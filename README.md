@@ -1,7 +1,7 @@
 # BROADCASTER
 ## Video Caster Application
 
-
+With a game capture device, cast your video directly on your pc. No need of an extra app
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/2f3d9d28-3026-441c-9abe-020663bc3117" />
 
 <p align="center">
@@ -20,3 +20,5 @@ Useful if sounds does not match the video.
 
 <img width="718" height="503" alt="image" src="https://github.com/user-attachments/assets/68ae451c-eef5-48f8-9633-b309919fdcb7" />
 <img width="713" height="503" alt="image" src="https://github.com/user-attachments/assets/12195c94-f721-4ba6-9753-5871919427d5" />
+
+This application was coded with the used of AI and everything is verified for no important leaks.
