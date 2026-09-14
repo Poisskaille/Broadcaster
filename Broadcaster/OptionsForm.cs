@@ -3,7 +3,7 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     public class OptionsForm : Form
     {
@@ -58,7 +58,7 @@ namespace SwitchViewer
             _initialConfig = currentConfig;
             _captureSession = captureSession;
 
-            Text = "Options - SwitchViewer";
+            Text = "Options - Broadcaster";
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -266,7 +266,7 @@ namespace SwitchViewer
             if (profile.IsDefault) return;
 
             var confirm = MessageBox.Show(this, $"Supprimer le profil \"{profile.Name}\" ?",
-                "SwitchViewer", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                "Broadcaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes) return;
 
             DeviceColorProfileStore.DeleteProfile(_captureSession.ActiveVideoSymbolicLink, profile);
@@ -302,7 +302,7 @@ namespace SwitchViewer
 
             if (_profileSet.Profiles.Any(p => p.Name == name))
             {
-                MessageBox.Show(this, "Un profil porte déjà ce nom.", "SwitchViewer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Un profil porte déjà ce nom.", "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -326,7 +326,7 @@ namespace SwitchViewer
 
             if (_profileSet.Profiles.Any(p => p.Name == newName))
             {
-                MessageBox.Show(this, "Un profil porte déjà ce nom.", "SwitchViewer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Un profil porte déjà ce nom.", "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -411,7 +411,7 @@ namespace SwitchViewer
         {
             if (!(_videoCombo.SelectedItem is VideoDeviceInfo selectedVideo))
             {
-                MessageBox.Show(this, "Aucune source vidéo sélectionnée.", "SwitchViewer",
+                MessageBox.Show(this, "Aucune source vidéo sélectionnée.", "Broadcaster",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 DialogResult = DialogResult.None;
                 return;

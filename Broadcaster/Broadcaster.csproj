@@ -4,8 +4,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>SwitchViewer</AssemblyName>
-    <RootNamespace>SwitchViewer</RootNamespace>
+    <AssemblyName>Broadcaster</AssemblyName>
+    <RootNamespace>Broadcaster</RootNamespace>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <ApplicationVisualStyles>true</ApplicationVisualStyles>

@@ -1,6 +1,6 @@
 using SharpDX.MediaFoundation;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     /// <summary>
     /// Représente un périphérique de capture vidéo détecté par Media Foundation

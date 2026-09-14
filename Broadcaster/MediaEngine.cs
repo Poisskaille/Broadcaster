@@ -6,7 +6,7 @@ using SharpDX.Mathematics.Interop;
 using SharpDX.MediaFoundation;
 using NAudio.CoreAudioApi;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     public static class MediaEngine
     {

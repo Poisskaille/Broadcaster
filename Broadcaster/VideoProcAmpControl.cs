@@ -2,7 +2,7 @@
 using System.Runtime.InteropServices;
 using SharpDX.MediaFoundation;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     /// <summary>
     /// Propriétés réglables sur un périphérique de capture WDM/UVC.

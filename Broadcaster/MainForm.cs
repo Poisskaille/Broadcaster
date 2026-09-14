@@ -2,7 +2,7 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     public class MainForm : Form
     {
@@ -147,7 +147,7 @@ namespace SwitchViewer
                 if (videoDevice == null)
                 {
                     MessageBox.Show(this, "Le périphérique vidéo configuré est introuvable. Ouvre les options (Échap) pour en choisir un autre.",
-                        "SwitchViewer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
 
@@ -171,7 +171,7 @@ namespace SwitchViewer
             catch (Exception ex)
             {
                 MessageBox.Show(this, "Impossible de démarrer la capture : " + ex.Message,
-                    "SwitchViewer", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 

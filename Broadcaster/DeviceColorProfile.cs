@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     public class ColorProfile
     {
@@ -56,7 +56,7 @@ namespace SwitchViewer
         private static string RootFolder =>
             EnsureFolder(Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "SwitchViewer", "ColorProfiles"));
+                "Broadcaster", "ColorProfiles"));
 
         private static string DeviceFolder(string videoSymbolicLink)
         {

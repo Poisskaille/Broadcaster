@@ -2,7 +2,7 @@ using System;
 using System.Windows.Forms;
 using SharpDX.MediaFoundation;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     internal static class Program
     {

@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace SwitchViewer
+namespace Broadcaster
 {
     /// <summary>
     /// Configuration persistée entre deux lancements : quel périphérique vidéo/audio utiliser,
@@ -30,7 +30,7 @@ namespace SwitchViewer
             {
                 string dir = Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                    "SwitchViewer");
+                    "Broadcaster");
                 Directory.CreateDirectory(dir);
                 return Path.Combine(dir, "config.ini");
             }
