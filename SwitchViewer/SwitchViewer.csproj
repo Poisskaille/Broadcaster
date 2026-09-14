@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>SwitchViewer</AssemblyName>
+    <RootNamespace>SwitchViewer</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Wrapper managé autour des interfaces COM Media Foundation -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="SharpDX" Version="4.2.0" />
+    <PackageReference Include="SharpDX.MediaFoundation" Version="4.2.0" />
+    <!-- Pour l'énumération des périphériques de sortie audio (WASAPI) et le contrôle du volume par session -->
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="System.Text.Json" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>
