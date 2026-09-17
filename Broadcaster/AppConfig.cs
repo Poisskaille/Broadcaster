@@ -22,6 +22,9 @@ namespace Broadcaster
         public int Hue { get; set; } = 0;
         public int Saturation { get; set; } = 0;
 
+        public int Width { get; set; } = 1920;
+        public int Height { get; set; } = 1080;
+
         public bool HasVideoDevice => !string.IsNullOrEmpty(VideoSymbolicLink);
 
         private static string ConfigPath
@@ -56,6 +59,8 @@ namespace Broadcaster
                 if (values.TryGetValue("AudioCaptureDeviceName", out var ac)) config.AudioCaptureDeviceName = ac;
                 if (values.TryGetValue("Volume", out var vol) && float.TryParse(vol, out var f)) config.Volume = f;
                 if (values.TryGetValue("FPS", out var fps) && int.TryParse(fps, out var _f)) config.FPS = _f;
+                if (values.TryGetValue("Width", out var w) && int.TryParse(w, out var _w)) config.Width = _w;
+                if (values.TryGetValue("Height", out var h) && int.TryParse(h, out var _h)) config.Height = _h;
             }
             catch
             {
@@ -74,7 +79,9 @@ namespace Broadcaster
                     $"AudioEndpointId={AudioEndpointId}",
                     $"AudioCaptureDeviceName={AudioCaptureDeviceName}",
                     $"Volume={Volume}",
-                    $"FPS={FPS}"
+                    $"FPS={FPS}",
+                    $"Width={Width}",
+                    $"Height={Height}"
                 });
             }
             catch

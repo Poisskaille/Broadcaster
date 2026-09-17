@@ -49,8 +49,14 @@ namespace Broadcaster
                     {
                         var profileSet = _capture.EnsureFactoryColorProfile();
                         _capture.ApplyColorCorrection(profileSet?.ActiveProfile);
+                        _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
                     }));
                 }
+            };
+
+            _renderSurface.Resize += (s, e) =>
+            {
+                _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
             };
         }
 
@@ -165,7 +171,7 @@ namespace Broadcaster
                         .Find(d => d.FriendlyName == _config.AudioCaptureDeviceName);
                 }
 
-                _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle, 1920, 1080, _config.FPS);
+                _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle, _config.Width, _config.Height, _config.FPS);
                 _capture.SetVolume(_config.Volume);
             }
             catch (Exception ex)

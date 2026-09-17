@@ -92,6 +92,7 @@ namespace Broadcaster
         private Topology _audioTopology;
         private MediaSource _audioSource;
         private Activate _audioRendererActivate;
+        private VideoDisplayPositionControl _videoDisplayControl;
         private Thread _audioEventThread;
         private volatile bool _audioRunning;
 
@@ -318,6 +319,7 @@ namespace Broadcaster
                     {
                         if (evt.TypeInfo == MediaEventTypes.SessionStarted && label == "vidéo")
                         {
+                            _videoDisplayControl = VideoDisplayPositionControl.TryCreate(session);
                             OnVideoSessionStarted?.Invoke();
                         }
 
@@ -339,6 +341,11 @@ namespace Broadcaster
                     break;
                 }
             }
+        }
+
+        public void ResizeVideoWindow(int width, int height)
+        {
+            _videoDisplayControl?.Resize(width, height);
         }
 
         public void SetVolume(float volume0to1)
@@ -392,6 +399,8 @@ namespace Broadcaster
             _videoProcAmp?.Dispose(); _videoProcAmp = null;
             ActiveVideoSymbolicLink = null;
             ActiveVideoFriendlyName = null;
+
+            _videoDisplayControl?.Dispose(); _videoDisplayControl = null;
 
             _videoSource?.Shutdown(); _videoSource?.Dispose(); _videoSource = null;
             _audioSource?.Shutdown(); _audioSource?.Dispose(); _audioSource = null;

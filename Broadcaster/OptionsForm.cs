@@ -14,6 +14,15 @@ namespace Broadcaster
         private readonly TrackBar _volumeTrack = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10 };
         private readonly Label _volumeLabel = new Label { AutoSize = true };
         private readonly NumericUpDown _fpsNumeric = new NumericUpDown { Minimum = 1, Maximum = 240, Value = 60 };
+        private readonly ComboBox _resolutionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+
+        private static readonly (string Label, int Width, int Height)[] ResolutionPresets = new[]
+        {
+    ("1280 x 720 (HD)", 1280, 720),
+    ("1920 x 1080 (Full HD)", 1920, 1080),
+    ("2560 x 1440 (2K / QHD)", 2560, 1440),
+    ("3840 x 2160 (4K UHD)", 3840, 2160),
+};
 
         // --- Onglet Vidéo ---
         private readonly ComboBox _profileCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -66,6 +75,7 @@ namespace Broadcaster
             ClientSize = new Size(700, 460);
 
             BuildLayout();
+            PopulateResolutionCombo();
             PopulateDevices();
             PopulateColorTab();
             AcceptButton = _okButton;
@@ -122,14 +132,19 @@ namespace Broadcaster
             _fpsNumeric.Location = new Point(15, 283);
             _fpsNumeric.Width = 100;
 
+            var resolutionLabel = new Label { Text = "Résolution :", AutoSize = true, Location = new Point(15, 320) };
+            _resolutionCombo.Location = new Point(15, 343);
+            _resolutionCombo.Width = 250;
+
             page.Controls.AddRange(new Control[]
-            {
-                videoLabel, _videoCombo,
-                audioCaptureLabel, _audioCaptureCombo,
-                audioOutputLabel, _audioOutputCombo,
-                volumeTitle, _volumeTrack, _volumeLabel,
-                fpsLabel, _fpsNumeric
-            });
+{
+    videoLabel, _videoCombo,
+    audioCaptureLabel, _audioCaptureCombo,
+    audioOutputLabel, _audioOutputCombo,
+    volumeTitle, _volumeTrack, _volumeLabel,
+    fpsLabel, _fpsNumeric,
+    resolutionLabel, _resolutionCombo
+});
         }
 
         private void BuildVideoTab(TabPage page)
@@ -157,6 +172,26 @@ namespace Broadcaster
             page.Controls.Add(_renameProfileButton);
             page.Controls.Add(_colorUnavailableLabel);
             page.Controls.Add(_deleteProfileButton);
+        }
+
+        private void PopulateResolutionCombo()
+        {
+            _resolutionCombo.Items.Clear();
+            foreach (var preset in ResolutionPresets)
+                _resolutionCombo.Items.Add(preset.Label);
+
+            int matchIndex = Array.FindIndex(ResolutionPresets,
+                p => p.Width == _initialConfig.Width && p.Height == _initialConfig.Height);
+
+            if (matchIndex < 0)
+            {
+                // Valeur qui ne correspond à aucun preset (config éditée à la main, par ex.) :
+                // on l'affiche telle quelle plutôt que de la remplacer silencieusement.
+                _resolutionCombo.Items.Add($"{_initialConfig.Width} x {_initialConfig.Height} (personnalisé)");
+                matchIndex = _resolutionCombo.Items.Count - 1;
+            }
+
+            _resolutionCombo.SelectedIndex = matchIndex;
         }
 
         private void BuildColorRow(TabPage page, ColorRow row, string labelText, ref int y)
@@ -436,13 +471,29 @@ namespace Broadcaster
                 DeviceColorProfileStore.SetActiveProfile(_captureSession.ActiveVideoSymbolicLink, profile.Name);
             }
 
+            int selectedWidth, selectedHeight;
+            if (_resolutionCombo.SelectedIndex < ResolutionPresets.Length)
+            {
+                selectedWidth = ResolutionPresets[_resolutionCombo.SelectedIndex].Width;
+                selectedHeight = ResolutionPresets[_resolutionCombo.SelectedIndex].Height;
+            }
+            else
+            {
+                // L'entrée "personnalisé" ajoutée dynamiquement est toujours restée sélectionnée
+                // telle quelle : on garde la valeur d'origine, inchangée.
+                selectedWidth = _initialConfig.Width;
+                selectedHeight = _initialConfig.Height;
+            }
+
             ResultConfig = new AppConfig
             {
                 VideoSymbolicLink = selectedVideo.SymbolicLink,
                 AudioCaptureDeviceName = selectedAudioCapture?.FriendlyName ?? "",
                 AudioEndpointId = selectedAudioOutput?.EndpointId ?? "",
                 Volume = _volumeTrack.Value / 100f,
-                FPS = (int)_fpsNumeric.Value
+                FPS = (int)_fpsNumeric.Value,
+                Width = selectedWidth,
+                Height = selectedHeight,
             };
         }
 
