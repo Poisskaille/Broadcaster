@@ -28,6 +28,7 @@ namespace Broadcaster
         public string DisplayDeviceName { get; set; } = "";
 
         public bool HasVideoDevice => !string.IsNullOrEmpty(VideoSymbolicLink);
+        public bool NoSignalDetectionEnabled { get; set; } = true;
 
         private static string ConfigPath
         {
@@ -64,6 +65,7 @@ namespace Broadcaster
                 if (values.TryGetValue("Width", out var w) && int.TryParse(w, out var _w)) config.Width = _w;
                 if (values.TryGetValue("Height", out var h) && int.TryParse(h, out var _h)) config.Height = _h;
                 if (values.TryGetValue("DisplayDeviceName", out var dn)) config.DisplayDeviceName = dn;
+                if (values.TryGetValue("NoSignalDetectionEnabled", out var nsd) && bool.TryParse(nsd, out var _nsd)) config.NoSignalDetectionEnabled = _nsd;
             }
             catch
             {
@@ -85,7 +87,8 @@ namespace Broadcaster
                     $"FPS={FPS}",
                     $"Width={Width}",
                     $"Height={Height}",
-                    $"DisplayDeviceName={DisplayDeviceName}"
+                    $"DisplayDeviceName={DisplayDeviceName}",
+                    $"NoSignalDetectionEnabled={NoSignalDetectionEnabled}"
                 });
             }
             catch

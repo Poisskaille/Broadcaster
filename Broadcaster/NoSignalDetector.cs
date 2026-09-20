@@ -15,17 +15,58 @@ namespace Broadcaster
     {
         private const int BrightnessThreshold = 14;
         private const double DarkFractionRequired = 0.95;
+        private const int GridSize = 8; // 8x8 = 64 points, sur tout l'écran
 
         /// <summary>
-        /// N'échantillonne QU'une fine bordure du panel (jamais recouverte par l'image de
-        /// "pas de signal", qui laisse volontairement cette bordure visible). Ça permet de lire
-        /// le flux vidéo réel en continu, sans jamais avoir besoin de cacher/réafficher l'overlay
-        /// — donc plus de clignotement, contrairement à l'ancienne technique.
+        /// Deux modes distincts : grille complète (précise, capte un logo centré) quand rien
+        /// ne recouvre le panel ; bordure seule (évite l'auto-observation) quand l'overlay
+        /// "pas de signal" est déjà affiché par-dessus.
         /// </summary>
-        public static bool IsControlDark(Control target, int borderThickness = 8)
+        public static bool IsControlDark(Control target, bool overlayCurrentlyVisible, int borderThickness = 8)
         {
             if (!target.IsHandleCreated) return false;
 
+            return overlayCurrentlyVisible
+                ? IsBorderDark(target, borderThickness)
+                : IsFullGridDark(target);
+        }
+
+        private static bool IsFullGridDark(Control target)
+        {
+            Size size = target.ClientSize;
+            if (size.Width <= 0 || size.Height <= 0) return false;
+
+            Point screenLocation = target.PointToScreen(Point.Empty);
+
+            using (var snapshot = new Bitmap(size.Width, size.Height))
+            {
+                using (var g = Graphics.FromImage(snapshot))
+                    g.CopyFromScreen(screenLocation, Point.Empty, size);
+
+                int darkCount = 0, totalCount = 0;
+
+                for (int gx = 0; gx < GridSize; gx++)
+                {
+                    for (int gy = 0; gy < GridSize; gy++)
+                    {
+                        int x = (int)((gx + 0.5) * size.Width / GridSize);
+                        int y = (int)((gy + 0.5) * size.Height / GridSize);
+                        if (x < 0 || x >= size.Width || y < 0 || y >= size.Height) continue;
+
+                        Color pixel = snapshot.GetPixel(x, y);
+                        int brightness = (pixel.R + pixel.G + pixel.B) / 3;
+
+                        totalCount++;
+                        if (brightness <= BrightnessThreshold) darkCount++;
+                    }
+                }
+
+                return totalCount > 0 && (double)darkCount / totalCount >= DarkFractionRequired;
+            }
+        }
+
+        private static bool IsBorderDark(Control target, int borderThickness)
+        {
             Size size = target.ClientSize;
             if (size.Width <= borderThickness * 2 || size.Height <= borderThickness * 2) return false;
 
@@ -58,10 +99,10 @@ namespace Broadcaster
                 }
             }
 
-            SampleStrip(0, 0, size.Width, borderThickness, 8, 1);                              // haut
-            SampleStrip(0, size.Height - borderThickness, size.Width, borderThickness, 8, 1);   // bas
-            SampleStrip(0, 0, borderThickness, size.Height, 1, 8);                              // gauche
-            SampleStrip(size.Width - borderThickness, 0, borderThickness, size.Height, 1, 8);   // droite
+            SampleStrip(0, 0, size.Width, borderThickness, 8, 1);
+            SampleStrip(0, size.Height - borderThickness, size.Width, borderThickness, 8, 1);
+            SampleStrip(0, 0, borderThickness, size.Height, 1, 8);
+            SampleStrip(size.Width - borderThickness, 0, borderThickness, size.Height, 1, 8);
 
             return totalCount > 0 && (double)darkCount / totalCount >= DarkFractionRequired;
         }

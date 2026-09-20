@@ -41,6 +41,12 @@ namespace Broadcaster
             Visible = false
         };
 
+        private readonly CheckBox _noSignalEnabledCheck = new CheckBox
+        {
+            Text = "Afficher l'image en l'absence de signal (10s)",
+            AutoSize = true
+        };
+
         private class ColorRow
         {
             public VideoProcAmpProperty Property;
@@ -168,10 +174,14 @@ namespace Broadcaster
             _chooseBackgroundButton.Click += (s, e) => ChooseBackgroundImage();
             _clearBackgroundButton.Click += (s, e) => ClearBackgroundImage();
 
+            _noSignalEnabledCheck.Location = new Point(15, 240);
+            _noSignalEnabledCheck.Checked = _initialConfig.NoSignalDetectionEnabled;
+
             page.Controls.Add(label);
             page.Controls.Add(_backgroundPreview);
             page.Controls.Add(_chooseBackgroundButton);
             page.Controls.Add(_clearBackgroundButton);
+            page.Controls.Add(_noSignalEnabledCheck);
 
             RefreshBackgroundPreview();
         }
@@ -608,6 +618,7 @@ namespace Broadcaster
                 Width = selectedWidth,
                 Height = selectedHeight,
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
+                NoSignalDetectionEnabled = _noSignalEnabledCheck.Checked,
             };
         }
 

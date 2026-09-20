@@ -95,7 +95,6 @@ namespace Broadcaster
                     _noSignalPictureBox.Visible = false;
                 }
             };
-            _noSignalDetector.Start();
         }
 
         private Screen GetTargetScreen()
@@ -119,7 +118,7 @@ namespace Broadcaster
         }
         private bool SampleIsDark()
         {
-            return ScreenDarknessSampler.IsControlDark(_renderSurface);
+            return ScreenDarknessSampler.IsControlDark(_renderSurface, _noSignalPictureBox.Visible);
         }
 
         private void MainForm_ResizeEnd(object sender, EventArgs e)
@@ -132,6 +131,9 @@ namespace Broadcaster
         {
             Cursor.Show();
             _config = AppConfig.Load();
+            if (_config.NoSignalDetectionEnabled)
+                _noSignalDetector.Start();
+
             EnterFullscreen();
 
             if (_config.HasVideoDevice)
@@ -223,7 +225,15 @@ namespace Broadcaster
                 }
             }
 
-
+            if (_config.NoSignalDetectionEnabled)
+            {
+                _noSignalDetector.Start(); // sans effet si déjà démarré
+            }
+            else
+            {
+                _noSignalDetector.Stop();
+                _noSignalPictureBox.Visible = false; // au cas où l'image était affichée au moment de la désactivation
+            }
 
             if (wasFullscreen && _isFullscreen) Cursor.Hide();
         }
