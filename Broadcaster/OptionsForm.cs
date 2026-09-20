@@ -16,12 +16,15 @@ namespace Broadcaster
         private readonly NumericUpDown _fpsNumeric = new NumericUpDown { Minimum = 1, Maximum = 240, Value = 60 };
         private readonly ComboBox _resolutionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
 
+        private readonly ComboBox _screenCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        private Screen[] _orderedScreens;
+
         private static readonly (string Label, int Width, int Height)[] ResolutionPresets = new[]
         {
-    ("1280 x 720 (HD)", 1280, 720),
-    ("1920 x 1080 (Full HD)", 1920, 1080),
-    ("2560 x 1440 (2K / QHD)", 2560, 1440),
-    ("3840 x 2160 (4K UHD)", 3840, 2160),
+        ("1280 x 720 (HD)", 1280, 720),
+        ("1920 x 1080 (Full HD)", 1920, 1080),
+        ("2560 x 1440 (2K / QHD)", 2560, 1440),
+        ("3840 x 2160 (4K UHD)", 3840, 2160),
 };
 
         // --- Onglet Vidéo ---
@@ -54,6 +57,14 @@ namespace Broadcaster
 
         private readonly Button _okButton = new Button { Text = "Appliquer", DialogResult = DialogResult.OK };
         private readonly Button _cancelButton = new Button { Text = "Annuler", DialogResult = DialogResult.Cancel };
+        private readonly PictureBox _backgroundPreview = new PictureBox
+        {
+            BorderStyle = BorderStyle.FixedSingle,
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Color.Black
+        };
+        private readonly Button _chooseBackgroundButton = new Button { Text = "Choisir une image...", AutoSize = true };
+        private readonly Button _clearBackgroundButton = new Button { Text = "Retirer l'image", AutoSize = true };
 
         public AppConfig ResultConfig { get; private set; }
 
@@ -61,6 +72,8 @@ namespace Broadcaster
         private readonly CaptureSession _captureSession;
         private bool _colorTabAvailable;
         private DeviceColorProfileSet _profileSet;
+
+
 
         public OptionsForm(AppConfig currentConfig, CaptureSession captureSession)
         {
@@ -72,10 +85,11 @@ namespace Broadcaster
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(700, 460);
+            ClientSize = new Size(700, 500);
 
             BuildLayout();
             PopulateResolutionCombo();
+            PopulateScreenCombo();
             PopulateDevices();
             PopulateColorTab();
             AcceptButton = _okButton;
@@ -91,36 +105,128 @@ namespace Broadcaster
 
         private void BuildLayout()
         {
-            var tabs = new TabControl { Location = new Point(10, 10), Size = new Size(680, 400) };
+            var tabs = new TabControl { Location = new Point(10, 10), Size = new Size(680, 460) };
             var generalTab = new TabPage("Général");
             var videoTab = new TabPage("Vidéo");
             tabs.TabPages.Add(generalTab);
             tabs.TabPages.Add(videoTab);
+            var extrasTab = new TabPage("Extras");
+            tabs.TabPages.Add(extrasTab);
+
+            BuildExtrasTab(extrasTab);
+
 
             BuildGeneralTab(generalTab);
             BuildVideoTab(videoTab);
 
-            _okButton.Location = new Point(510, 420);
-            _cancelButton.Location = new Point(600, 420);
+            _okButton.Location = new Point(510, 460);
+            _cancelButton.Location = new Point(600, 460);
 
             Controls.Add(tabs);
             Controls.Add(_okButton);
             Controls.Add(_cancelButton);
         }
 
+        private void PopulateScreenCombo()
+        {
+            var all = Screen.AllScreens;
+            var primary = Array.Find(all, s => s.Primary);
+            var others = Array.FindAll(all, s => !s.Primary);
+            Array.Sort(others, (a, b) => a.Bounds.X.CompareTo(b.Bounds.X)); // gauche à droite
+
+            _orderedScreens = new Screen[all.Length];
+            _orderedScreens[0] = primary ?? all[0];
+            Array.Copy(others, 0, _orderedScreens, 1, others.Length);
+
+            _screenCombo.Items.Clear();
+            for (int i = 0; i < _orderedScreens.Length; i++)
+            {
+                var s = _orderedScreens[i];
+                string suffix = s.Primary ? " (Principal)" : "";
+                _screenCombo.Items.Add($"Écran {i + 1}{suffix} - {s.Bounds.Width}x{s.Bounds.Height}");
+            }
+
+            int match = Array.FindIndex(_orderedScreens, s => s.DeviceName == _initialConfig.DisplayDeviceName);
+            _screenCombo.SelectedIndex = match >= 0 ? match : 0;
+        }
+
+        private void BuildExtrasTab(TabPage page)
+        {
+            var label = new Label
+            {
+                Text = "Image affichée quand aucun signal n'est reçu depuis 10 secondes :",
+                AutoSize = true,
+                Location = new Point(15, 15)
+            };
+
+            _backgroundPreview.Location = new Point(15, 45);
+            _backgroundPreview.Size = new Size(320, 180);
+
+            _chooseBackgroundButton.Location = new Point(350, 45);
+            _clearBackgroundButton.Location = new Point(350, 80);
+
+            _chooseBackgroundButton.Click += (s, e) => ChooseBackgroundImage();
+            _clearBackgroundButton.Click += (s, e) => ClearBackgroundImage();
+
+            page.Controls.Add(label);
+            page.Controls.Add(_backgroundPreview);
+            page.Controls.Add(_chooseBackgroundButton);
+            page.Controls.Add(_clearBackgroundButton);
+
+            RefreshBackgroundPreview();
+        }
+
+        private void RefreshBackgroundPreview()
+        {
+            _backgroundPreview.Image?.Dispose();
+            _backgroundPreview.Image = BackgroundImageStore.LoadDetachedCopy(); // null si le fichier n'existe pas, pas de souci
+
+            _clearBackgroundButton.Enabled = BackgroundImageStore.Exists();
+        }
+
+        private void ChooseBackgroundImage()
+        {
+            using (var dialog = new OpenFileDialog
+            {
+                Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp",
+                Title = "Choisir une image de fond"
+            })
+            {
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    try
+                    {
+                        BackgroundImageStore.SetFrom(dialog.FileName);
+                        RefreshBackgroundPreview();
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(this, "Impossible de charger cette image : " + ex.Message,
+                            "SwitchViewer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+            }
+        }
+
+        private void ClearBackgroundImage()
+        {
+            BackgroundImageStore.Clear();
+            RefreshBackgroundPreview();
+        }
+
         private void BuildGeneralTab(TabPage page)
         {
-            var videoLabel = new Label { Text = "Capture Source :", AutoSize = true, Location = new Point(15, 15) };
-            _videoCombo.Location = new Point(15, 38);
-            _videoCombo.Width = 405;
+            var screenLabel = new Label { Text = "Écran (plein écran) :", AutoSize = true, Location = new Point(15, 15) };
+            _screenCombo.Location = new Point(15, 38);
+            _screenCombo.Width = 300;
 
-            var audioCaptureLabel = new Label { Text = "Audio Capture (if need to separate audio and video)", AutoSize = true, Location = new Point(15, 75) };
-            _audioCaptureCombo.Location = new Point(15, 98);
-            _audioCaptureCombo.Width = 405;
+            var resolutionLabel = new Label { Text = "Résolution :", AutoSize = true, Location = new Point(15, 75) };
+            _resolutionCombo.Location = new Point(15, 98);
+            _resolutionCombo.Width = 250;
 
-            var audioOutputLabel = new Label { Text = "Audio Output :", AutoSize = true, Location = new Point(15, 135) };
-            _audioOutputCombo.Location = new Point(15, 158);
-            _audioOutputCombo.Width = 405;
+            var fpsLabel = new Label { Text = "FPS :", AutoSize = true, Location = new Point(15, 135) };
+            _fpsNumeric.Location = new Point(15, 158);
+            _fpsNumeric.Width = 100;
 
             var volumeTitle = new Label { Text = "Volume :", AutoSize = true, Location = new Point(15, 195) };
             _volumeTrack.Location = new Point(15, 218);
@@ -128,23 +234,30 @@ namespace Broadcaster
             _volumeTrack.ValueChanged += (s, e) => _volumeLabel.Text = $"{_volumeTrack.Value}%";
             _volumeLabel.Location = new Point(345, 225);
 
-            var fpsLabel = new Label { Text = "FPS :", AutoSize = true, Location = new Point(15, 260) };
-            _fpsNumeric.Location = new Point(15, 283);
-            _fpsNumeric.Width = 100;
+            var videoLabel = new Label { Text = "Capture Source :", AutoSize = true, Location = new Point(15, 260) };
+            _videoCombo.Location = new Point(15, 283);
+            _videoCombo.Width = 405;
 
-            var resolutionLabel = new Label { Text = "Résolution :", AutoSize = true, Location = new Point(15, 320) };
-            _resolutionCombo.Location = new Point(15, 343);
-            _resolutionCombo.Width = 250;
+            var audioCaptureLabel = new Label { Text = "Audio Capture (if need to separate audio and video)", AutoSize = true, Location = new Point(15, 320) };
+            _audioCaptureCombo.Location = new Point(15, 343);
+            _audioCaptureCombo.Width = 405;
+
+            var audioOutputLabel = new Label { Text = "Audio Output :", AutoSize = true, Location = new Point(15, 385) };
+            _audioOutputCombo.Location = new Point(15, 408);
+            _audioOutputCombo.Width = 405;
 
             page.Controls.AddRange(new Control[]
-{
-    videoLabel, _videoCombo,
-    audioCaptureLabel, _audioCaptureCombo,
-    audioOutputLabel, _audioOutputCombo,
-    volumeTitle, _volumeTrack, _volumeLabel,
-    fpsLabel, _fpsNumeric,
-    resolutionLabel, _resolutionCombo
-});
+            {
+                                screenLabel, _screenCombo,
+                videoLabel, _videoCombo,
+                audioCaptureLabel, _audioCaptureCombo,
+                audioOutputLabel, _audioOutputCombo,
+                volumeTitle, _volumeTrack, _volumeLabel,
+                fpsLabel, _fpsNumeric,
+                resolutionLabel, _resolutionCombo,
+
+
+            });
         }
 
         private void BuildVideoTab(TabPage page)
@@ -494,6 +607,7 @@ namespace Broadcaster
                 FPS = (int)_fpsNumeric.Value,
                 Width = selectedWidth,
                 Height = selectedHeight,
+                DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
             };
         }
 

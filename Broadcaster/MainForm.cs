@@ -8,6 +8,16 @@ namespace Broadcaster
     {
         private readonly CaptureSession _capture = new CaptureSession();
         private readonly Panel _renderSurface = new Panel();
+
+        private const int NoSignalBorderMargin = 8;
+
+        private readonly PictureBox _noSignalPictureBox = new PictureBox
+        {
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Color.Black,
+            Visible = false
+        };
+        private NoSignalDetector _noSignalDetector;
         private AppConfig _config;
 
         private bool _isFullscreen;
@@ -24,9 +34,11 @@ namespace Broadcaster
             StartPosition = FormStartPosition.Manual;
             Bounds = Screen.PrimaryScreen.Bounds;
 
+
             _renderSurface.Dock = DockStyle.Fill;
             _renderSurface.BackColor = Color.Black;
             Controls.Add(_renderSurface);
+            Controls.Add(_noSignalPictureBox);
 
             KeyDown += MainForm_KeyDown;
             Shown += MainForm_Shown;
@@ -49,6 +61,8 @@ namespace Broadcaster
                     {
                         var profileSet = _capture.EnsureFactoryColorProfile();
                         _capture.ApplyColorCorrection(profileSet?.ActiveProfile);
+
+                        _capture.EnsureVideoDisplayControl();
                         _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
                     }));
                 }
@@ -57,7 +71,60 @@ namespace Broadcaster
             _renderSurface.Resize += (s, e) =>
             {
                 _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
+                UpdateNoSignalBounds();
             };
+
+            ResizeEnd += MainForm_ResizeEnd;
+
+            _noSignalDetector = new NoSignalDetector(SampleIsDark, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
+            _noSignalDetector.NoSignalStateChanged += noSignal =>
+            {
+                if (noSignal && BackgroundImageStore.Exists())
+                {
+                    _noSignalPictureBox.Image?.Dispose();
+                    _noSignalPictureBox.Image = BackgroundImageStore.LoadDetachedCopy();
+                    if (_noSignalPictureBox.Image == null) return;
+
+                    UpdateNoSignalBounds();
+                    _noSignalPictureBox.Visible = true;
+                    _noSignalPictureBox.BringToFront();
+                }
+                else
+                {
+                    _noSignalPictureBox.Visible = false;
+                }
+            };
+            _noSignalDetector.Start();
+        }
+
+        private Screen GetTargetScreen()
+        {
+            if (_config != null && !string.IsNullOrEmpty(_config.DisplayDeviceName))
+            {
+                var match = Array.Find(Screen.AllScreens, s => s.DeviceName == _config.DisplayDeviceName);
+                if (match != null) return match;
+            }
+            return Screen.PrimaryScreen;
+        }
+
+        private void UpdateNoSignalBounds()
+        {
+            var r = _renderSurface.Bounds;
+            _noSignalPictureBox.Bounds = new Rectangle(
+                r.Left + NoSignalBorderMargin,
+                r.Top + NoSignalBorderMargin,
+                Math.Max(0, r.Width - NoSignalBorderMargin * 2),
+                Math.Max(0, r.Height - NoSignalBorderMargin * 2));
+        }
+        private bool SampleIsDark()
+        {
+            return ScreenDarknessSampler.IsControlDark(_renderSurface);
+        }
+
+        private void MainForm_ResizeEnd(object sender, EventArgs e)
+        {
+            if (_config != null && _config.HasVideoDevice)
+                StartCaptureFromConfig();
         }
 
         private void MainForm_Shown(object sender, EventArgs e)
@@ -77,6 +144,8 @@ namespace Broadcaster
             if (e.KeyCode == Keys.F11)
             {
                 ToggleFullscreen();
+                if (_config != null && _config.HasVideoDevice)
+                    StartCaptureFromConfig();
                 e.Handled = true;
             }
             else if (e.KeyCode == Keys.Escape)
@@ -105,12 +174,24 @@ namespace Broadcaster
             _previousBorderStyle = FormBorderStyle;
             _previousBounds = Bounds;
 
+            var targetScreen = GetTargetScreen();
+
             FormBorderStyle = FormBorderStyle.None;
             WindowState = FormWindowState.Normal;
-            Bounds = Screen.PrimaryScreen.Bounds;
+            Bounds = targetScreen.Bounds;
             WindowState = FormWindowState.Maximized;
 
             _isFullscreen = true;
+        }
+
+        private void MoveFullscreenToConfiguredScreen()
+        {
+            if (!_isFullscreen) return;
+
+            var targetScreen = GetTargetScreen();
+            WindowState = FormWindowState.Normal;
+            Bounds = targetScreen.Bounds;
+            WindowState = FormWindowState.Maximized;
         }
 
         private void ExitFullscreen()
@@ -136,9 +217,12 @@ namespace Broadcaster
                 {
                     _config = form.ResultConfig;
                     _config.Save();
+                    MoveFullscreenToConfiguredScreen();
                     StartCaptureFromConfig();
                 }
             }
+
+
 
             if (wasFullscreen && _isFullscreen) Cursor.Hide();
         }
@@ -184,6 +268,7 @@ namespace Broadcaster
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             _capture.Dispose();
+            _noSignalDetector?.Dispose();
         }
     }
 }

@@ -87,11 +87,13 @@ namespace Broadcaster
         private Activate _videoRendererActivate;
         private Thread _videoEventThread;
         private volatile bool _videoRunning;
-
+        public bool HasVideoDisplayControl => _videoDisplayControl != null;
         private MediaSession _audioSession;
         private Topology _audioTopology;
         private MediaSource _audioSource;
         private Activate _audioRendererActivate;
+        private int _lastRequestedWidth;
+        private int _lastRequestedHeight;
         private VideoDisplayPositionControl _videoDisplayControl;
         private Thread _audioEventThread;
         private volatile bool _audioRunning;
@@ -104,6 +106,7 @@ namespace Broadcaster
         public float CurrentVolume { get; private set; } = 1.0f;
         public string ActiveVideoSymbolicLink { get; private set; }
         public string ActiveVideoFriendlyName { get; private set; }
+
 
         public void Start(VideoDeviceInfo videoDevice, AudioDeviceInfo audioOutputDevice, AudioCaptureDeviceInfo audioCaptureDevice,
                            IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps)
@@ -125,6 +128,34 @@ namespace Broadcaster
             }
 
             SetVolume(CurrentVolume);
+        }
+
+        public void EnsureVideoDisplayControl(int attemptsLeft = 6)
+        {
+            if (_videoDisplayControl != null) return;
+
+            _videoDisplayControl = VideoDisplayPositionControl.TryCreate(_videoSession);
+
+            if (_videoDisplayControl != null)
+            {
+                // Applique tout de suite la dernière taille de fenêtre demandée, plutôt que
+                // d'attendre que l'utilisateur redimensionne à nouveau pour que ça "rattrape".
+                if (_lastRequestedWidth > 0 && _lastRequestedHeight > 0)
+                    _videoDisplayControl.Resize(_lastRequestedWidth, _lastRequestedHeight);
+                return;
+            }
+
+            if (attemptsLeft > 0)
+            {
+                var retryTimer = new System.Windows.Forms.Timer { Interval = 400 };
+                retryTimer.Tick += (s, e) =>
+                {
+                    retryTimer.Stop();
+                    retryTimer.Dispose();
+                    EnsureVideoDisplayControl(attemptsLeft - 1);
+                };
+                retryTimer.Start();
+            }
         }
 
         private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps)
@@ -183,7 +214,7 @@ namespace Broadcaster
             return DeviceColorProfileStore.EnsureFactoryProfileExists(ActiveVideoSymbolicLink, ActiveVideoFriendlyName, snapshot);
         }
 
-        public void ApplyColorCorrection(ColorProfile profile, int attemptsLeft = 6)
+        public void ApplyColorCorrection(ColorProfile profile, int attemptsLeft = 20)
         {
             if (_videoProcAmp == null || profile == null)
                 return;
@@ -319,7 +350,6 @@ namespace Broadcaster
                     {
                         if (evt.TypeInfo == MediaEventTypes.SessionStarted && label == "vidéo")
                         {
-                            _videoDisplayControl = VideoDisplayPositionControl.TryCreate(session);
                             OnVideoSessionStarted?.Invoke();
                         }
 
@@ -345,6 +375,8 @@ namespace Broadcaster
 
         public void ResizeVideoWindow(int width, int height)
         {
+            _lastRequestedWidth = width;
+            _lastRequestedHeight = height;
             _videoDisplayControl?.Resize(width, height);
         }
 
