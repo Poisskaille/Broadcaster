@@ -119,8 +119,8 @@ namespace Broadcaster
             BuildGeneralTab(generalTab);
             BuildVideoTab(videoTab);
 
-            _okButton.Location = new Point(510, 460);
-            _cancelButton.Location = new Point(600, 460);
+            _okButton.Location = new Point(510, 470);
+            _cancelButton.Location = new Point(600, 470);
 
             Controls.Add(tabs);
             Controls.Add(_okButton);

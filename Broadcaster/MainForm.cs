@@ -28,6 +28,7 @@ namespace Broadcaster
         public MainForm()
         {
             Text = "Broadcaster";
+            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             BackColor = Color.Black;
             KeyPreview = true;
             DoubleBuffered = true;
