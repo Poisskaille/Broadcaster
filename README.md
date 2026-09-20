@@ -1,5 +1,6 @@
-# Video Caster Application
+<img width="1280" height="720" alt="background" src="https://github.com/user-attachments/assets/ca71e594-a051-4e06-9394-30ce5e8f7571" />
 
+## Cast
 With a game capture device, cast your video directly on your pc. No need of an extra app
 <img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/2f3d9d28-3026-441c-9abe-020663bc3117" />
 
