@@ -109,7 +109,7 @@ namespace Broadcaster
 
 
         public void Start(VideoDeviceInfo videoDevice, AudioDeviceInfo audioOutputDevice, AudioCaptureDeviceInfo audioCaptureDevice,
-                           IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps)
+                           IntPtr renderHwnd, int targetWidth, int targetHeight)
         {
             Stop();
 
@@ -120,7 +120,7 @@ namespace Broadcaster
 
             _audioEndpointId = audioOutputDevice?.EndpointId;
 
-            StartVideoSession(videoDevice, renderHwnd, targetWidth, targetHeight, targetFps);
+            StartVideoSession(videoDevice, renderHwnd, targetWidth, targetHeight);
 
             if (audioCaptureDevice?.Activate != null)
             {
@@ -158,7 +158,7 @@ namespace Broadcaster
             }
         }
 
-        private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps)
+        private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight)
         {
             _videoSource = videoDevice.Activate.ActivateObject<MediaSource>();
             _videoProcAmp = VideoProcAmpControl.TryCreate(_videoSource);
@@ -178,7 +178,7 @@ namespace Broadcaster
                 MediaTypeHandler handler = streamDescriptor.MediaTypeHandler;
                 if (handler.MajorType != MediaTypeGuids.Video) continue;
 
-                ApplyBestVideoFormat(handler, targetWidth, targetHeight, targetFps);
+                ApplyBestVideoFormat(handler, targetWidth, targetHeight);
 
                 TopologyNode sourceNode = CreateSourceNode(_videoTopology, _videoSource, presDescriptor, streamDescriptor);
                 MediaFactory.CreateVideoRendererActivate(renderHwnd, out Activate videoRendererActivate);
@@ -286,10 +286,10 @@ namespace Broadcaster
             _audioSession.Start(null, varStart);
         }
 
-        private static void ApplyBestVideoFormat(MediaTypeHandler handler, int wantedWidth, int wantedHeight, int wantedFps)
+        private static void ApplyBestVideoFormat(MediaTypeHandler handler, int wantedWidth, int wantedHeight)
         {
             MediaType best = null;
-            long bestScore = long.MinValue;
+            double bestScore = double.MinValue;
 
             int count = handler.MediaTypeCount;
             for (int i = 0; i < count; i++)
@@ -305,11 +305,12 @@ namespace Broadcaster
                 int fpsDen = (int)(packedRate & 0xFFFFFFFF);
                 double fps = fpsDen == 0 ? 0 : (double)fpsNum / fpsDen;
 
-                long score = 0;
+                // Priorité écrasante à la résolution demandée ; à résolution égale, on
+                // départage en prenant le FPS le plus haut proposé par le device.
+                double score = 0;
                 if (width == wantedWidth && height == wantedHeight) score += 1_000_000;
-                if (Math.Abs(fps - wantedFps) < 0.5) score += 500_000;
                 score -= Math.Abs(width - wantedWidth) + Math.Abs(height - wantedHeight);
-                score -= (long)(Math.Abs(fps - wantedFps) * 100);
+                score += fps;
 
                 if (score > bestScore)
                 {

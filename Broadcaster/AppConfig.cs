@@ -15,7 +15,6 @@ namespace Broadcaster
         public string AudioEndpointId { get; set; } = "";
         public string AudioCaptureDeviceName { get; set; } = "";
         public float Volume { get; set; } = 1.0f;
-        public int FPS { get; set; } = 60;
         public bool UseColorCorrection { get; set; } = false;
         public int Brightness { get; set; } = 0;
         public int Contrast { get; set; } = 0;
@@ -61,7 +60,6 @@ namespace Broadcaster
                 if (values.TryGetValue("AudioEndpointId", out var a)) config.AudioEndpointId = a;
                 if (values.TryGetValue("AudioCaptureDeviceName", out var ac)) config.AudioCaptureDeviceName = ac;
                 if (values.TryGetValue("Volume", out var vol) && float.TryParse(vol, out var f)) config.Volume = f;
-                if (values.TryGetValue("FPS", out var fps) && int.TryParse(fps, out var _f)) config.FPS = _f;
                 if (values.TryGetValue("Width", out var w) && int.TryParse(w, out var _w)) config.Width = _w;
                 if (values.TryGetValue("Height", out var h) && int.TryParse(h, out var _h)) config.Height = _h;
                 if (values.TryGetValue("DisplayDeviceName", out var dn)) config.DisplayDeviceName = dn;
@@ -84,7 +82,6 @@ namespace Broadcaster
                     $"AudioEndpointId={AudioEndpointId}",
                     $"AudioCaptureDeviceName={AudioCaptureDeviceName}",
                     $"Volume={Volume}",
-                    $"FPS={FPS}",
                     $"Width={Width}",
                     $"Height={Height}",
                     $"DisplayDeviceName={DisplayDeviceName}",

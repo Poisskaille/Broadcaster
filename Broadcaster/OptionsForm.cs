@@ -13,7 +13,6 @@ namespace Broadcaster
         private readonly ComboBox _audioOutputCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly TrackBar _volumeTrack = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10 };
         private readonly Label _volumeLabel = new Label { AutoSize = true };
-        private readonly NumericUpDown _fpsNumeric = new NumericUpDown { Minimum = 1, Maximum = 240, Value = 60 };
         private readonly ComboBox _resolutionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
 
         private readonly ComboBox _screenCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -234,10 +233,6 @@ namespace Broadcaster
             _resolutionCombo.Location = new Point(15, 98);
             _resolutionCombo.Width = 250;
 
-            var fpsLabel = new Label { Text = "FPS :", AutoSize = true, Location = new Point(15, 135) };
-            _fpsNumeric.Location = new Point(15, 158);
-            _fpsNumeric.Width = 100;
-
             var volumeTitle = new Label { Text = "Volume :", AutoSize = true, Location = new Point(15, 195) };
             _volumeTrack.Location = new Point(15, 218);
             _volumeTrack.Width = 320;
@@ -263,7 +258,6 @@ namespace Broadcaster
                 audioCaptureLabel, _audioCaptureCombo,
                 audioOutputLabel, _audioOutputCombo,
                 volumeTitle, _volumeTrack, _volumeLabel,
-                fpsLabel, _fpsNumeric,
                 resolutionLabel, _resolutionCombo,
 
 
@@ -562,7 +556,6 @@ namespace Broadcaster
 
             _volumeTrack.Value = (int)Math.Round(_initialConfig.Volume * 100);
             _volumeLabel.Text = $"{_volumeTrack.Value}%";
-            _fpsNumeric.Value = (decimal)_initialConfig.FPS;
         }
 
         private void OkButton_Click(object sender, EventArgs e)
@@ -614,7 +607,6 @@ namespace Broadcaster
                 AudioCaptureDeviceName = selectedAudioCapture?.FriendlyName ?? "",
                 AudioEndpointId = selectedAudioOutput?.EndpointId ?? "",
                 Volume = _volumeTrack.Value / 100f,
-                FPS = (int)_fpsNumeric.Value,
                 Width = selectedWidth,
                 Height = selectedHeight,
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,

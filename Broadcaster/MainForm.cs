@@ -266,7 +266,7 @@ namespace Broadcaster
                         .Find(d => d.FriendlyName == _config.AudioCaptureDeviceName);
                 }
 
-                _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle, _config.Width, _config.Height, _config.FPS);
+                _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle, _config.Width, _config.Height);
                 _capture.SetVolume(_config.Volume);
             }
             catch (Exception ex)
