@@ -14,19 +14,36 @@ namespace Broadcaster
         public Keys OpenMenu { get; set; } = Keys.Escape;
         public Keys Reload { get; set; } = Keys.R;
         public Keys ToggleCursor { get; set; } = Keys.T;
+        public Keys Screenshot { get; set; } = Keys.F12;
 
-        public KeyBindings Clone() => new KeyBindings { OpenMenu = OpenMenu, Reload = Reload, ToggleCursor = ToggleCursor };
+        public KeyBindings Clone() => new KeyBindings
+        {
+            OpenMenu = OpenMenu,
+            Reload = Reload,
+            ToggleCursor = ToggleCursor,
+            Screenshot = Screenshot
+        };
 
         public bool IsValid()
         {
-            var all = new[] { OpenMenu, Reload, ToggleCursor };
-            return all.Distinct().Count() == all.Length && !all.Contains(ReservedKey);
+            var all = new[] { OpenMenu, Reload, ToggleCursor, Screenshot };
+            return all.All(k => k != Keys.None && k != ReservedKey)
+                && all.Distinct().Count() == all.Length;
+        }
+
+        // Migration des anciens config.ini : si F12 est déjà occupée, on n'écrase
+        // pas les raccourcis existants.
+        public static Keys ChooseScreenshotKey(KeyBindings bindings)
+        {
+            var used = new[] { bindings.OpenMenu, bindings.Reload, bindings.ToggleCursor };
+            var candidates = new[] { Keys.F12, Keys.F10, Keys.F9, Keys.F8, Keys.P };
+            return candidates.First(k => k != ReservedKey && !used.Contains(k));
         }
     }
 
     public class KeyBindingsForm : Form
     {
-        private enum BindingAction { OpenMenu, Reload, ToggleCursor }
+        private enum BindingAction { OpenMenu, Reload, ToggleCursor, Screenshot }
 
         private static readonly Keys[] ModifierOnlyKeys =
         {
@@ -39,7 +56,8 @@ namespace Broadcaster
         {
             { BindingAction.OpenMenu, "Ouvrir le menu" },
             { BindingAction.Reload, "Relancer la capture" },
-            { BindingAction.ToggleCursor, "Afficher / masquer le curseur" }
+            { BindingAction.ToggleCursor, "Afficher / masquer le curseur" },
+            { BindingAction.Screenshot, "Capture d'écran" }
         };
 
         private readonly KeyBindings _working;
@@ -59,7 +77,7 @@ namespace Broadcaster
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(480, 230);
+            ClientSize = new Size(480, 270);
 
             int y = 20;
             foreach (BindingAction action in Enum.GetValues(typeof(BindingAction)))
@@ -76,9 +94,9 @@ namespace Broadcaster
                 Location = new Point(15, y + 25)
             };
 
-            var resetButton = new Button { Text = "Réinitialiser", Size = new Size(100, 28), Location = new Point(15, 190) };
-            var saveButton = new Button { Text = "Enregistrer", Size = new Size(90, 28), DialogResult = DialogResult.OK, Location = new Point(285, 190) };
-            var cancelButton = new Button { Text = "Annuler", Size = new Size(90, 28), DialogResult = DialogResult.Cancel, Location = new Point(380, 190) };
+            var resetButton = new Button { Text = "Réinitialiser", Size = new Size(100, 28), Location = new Point(15, 230) };
+            var saveButton = new Button { Text = "Enregistrer", Size = new Size(90, 28), DialogResult = DialogResult.OK, Location = new Point(285, 230) };
+            var cancelButton = new Button { Text = "Annuler", Size = new Size(90, 28), DialogResult = DialogResult.Cancel, Location = new Point(380, 230) };
 
             resetButton.Click += (s, e) => ResetToDefaults();
             saveButton.Click += (s, e) => Result = _working.Clone();
@@ -155,6 +173,7 @@ namespace Broadcaster
             _working.OpenMenu = defaults.OpenMenu;
             _working.Reload = defaults.Reload;
             _working.ToggleCursor = defaults.ToggleCursor;
+            _working.Screenshot = defaults.Screenshot;
             _capturing = null;
             _statusLabel.Text = "";
             RefreshLabels();
@@ -166,7 +185,9 @@ namespace Broadcaster
             {
                 case BindingAction.OpenMenu: return _working.OpenMenu;
                 case BindingAction.Reload: return _working.Reload;
-                default: return _working.ToggleCursor;
+                case BindingAction.ToggleCursor: return _working.ToggleCursor;
+                case BindingAction.Screenshot: return _working.Screenshot;
+                default: throw new ArgumentOutOfRangeException(nameof(action));
             }
         }
 
@@ -176,7 +197,9 @@ namespace Broadcaster
             {
                 case BindingAction.OpenMenu: _working.OpenMenu = key; break;
                 case BindingAction.Reload: _working.Reload = key; break;
-                default: _working.ToggleCursor = key; break;
+                case BindingAction.ToggleCursor: _working.ToggleCursor = key; break;
+                case BindingAction.Screenshot: _working.Screenshot = key; break;
+                default: throw new ArgumentOutOfRangeException(nameof(action));
             }
         }
 

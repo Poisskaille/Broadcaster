@@ -65,6 +65,15 @@ namespace Broadcaster
                 config.Bindings.OpenMenu = ParseKey(values, "Key_OpenMenu", config.Bindings.OpenMenu);
                 config.Bindings.Reload = ParseKey(values, "Key_Reload", config.Bindings.Reload);
                 config.Bindings.ToggleCursor = ParseKey(values, "Key_ToggleCursor", config.Bindings.ToggleCursor);
+                config.Bindings.Screenshot = ParseKey(values, "Key_Screenshot", config.Bindings.Screenshot);
+                if (!values.ContainsKey("Key_Screenshot") ||
+                    config.Bindings.Screenshot == config.Bindings.OpenMenu ||
+                    config.Bindings.Screenshot == config.Bindings.Reload ||
+                    config.Bindings.Screenshot == config.Bindings.ToggleCursor ||
+                    config.Bindings.Screenshot == KeyBindings.ReservedKey)
+                {
+                    config.Bindings.Screenshot = KeyBindings.ChooseScreenshotKey(config.Bindings);
+                }
                 if (!config.Bindings.IsValid()) config.Bindings = new KeyBindings(); // garde-fou anti-enfermement
 
                 if (values.TryGetValue("AutoReloadOnStart", out var arl) && bool.TryParse(arl, out var _arl)) config.AutoReloadOnStart = _arl;
@@ -100,6 +109,7 @@ namespace Broadcaster
                     $"Key_OpenMenu={Bindings.OpenMenu}",
                     $"Key_Reload={Bindings.Reload}",
                     $"Key_ToggleCursor={Bindings.ToggleCursor}",
+                    $"Key_Screenshot={Bindings.Screenshot}",
                     $"AutoReloadOnStart={AutoReloadOnStart}"
                 });
             }

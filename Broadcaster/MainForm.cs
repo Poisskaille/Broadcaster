@@ -152,6 +152,7 @@ namespace Broadcaster
                 else if (keyData == _config.Bindings.OpenMenu) action = OpenOptions;
                 else if (keyData == _config.Bindings.Reload) action = ReloadCapture;
                 else if (keyData == _config.Bindings.ToggleCursor) action = ToggleCursorVisibility;
+                else if (keyData == _config.Bindings.Screenshot) action = TakeScreenshot;
 
                 if (action != null)
                 {
@@ -166,6 +167,32 @@ namespace Broadcaster
         {
             if (_config != null && _config.HasVideoDevice)
                 StartCaptureFromConfig();
+        }
+
+        // --- Capture d'écran (F12 par défaut ; personnalisable dans Extras) ---
+        private void TakeScreenshot()
+        {
+            if (_isOptionsOpen || _config == null ||
+                !_renderSurface.IsHandleCreated ||
+                string.IsNullOrEmpty(_capture.ActiveVideoSymbolicLink) ||
+                _noSignalPictureBox.Visible)
+            {
+                System.Media.SystemSounds.Exclamation.Play();
+                return;
+            }
+
+            try
+            {
+                ScreenshotStore.Save(_renderSurface);
+                // Confirmation discrète, sans afficher de fenêtre sur le jeu.
+                try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Impossible d'enregistrer la capture d'écran : " + ex.Message,
+                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         // --- Curseur ---

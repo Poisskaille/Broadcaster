@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Diagnostics;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -18,6 +19,7 @@ namespace Broadcaster
         private readonly ComboBox _screenCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
 
         private readonly Button _checkUpdateButton = new Button { Text = "Rechercher une mise à jour", AutoSize = true };
+        private readonly Button _openScreenshotsButton = new Button { Text = "Ouvrir le dossier des captures", AutoSize = true };
         private readonly Label _updateStatusLabel = new Label { AutoSize = true, MaximumSize = new Size(460, 0) };
         private Screen[] _orderedScreens;
 
@@ -198,6 +200,9 @@ namespace Broadcaster
             _updateStatusLabel.Location = new Point(200, 85);
             _updateStatusLabel.Text = $"Version actuelle : {UpdateChecker.CurrentVersion}";
 
+            _openScreenshotsButton.Location = new Point(15, 120);
+            _openScreenshotsButton.Click += (s, e) => OpenScreenshotsFolder();
+
 
 
             // Desactivation de la feature du background automatique
@@ -210,8 +215,27 @@ namespace Broadcaster
             page.Controls.Add(_keyBindingsButton);
             page.Controls.Add(_checkUpdateButton);
             page.Controls.Add(_updateStatusLabel);
+            page.Controls.Add(_openScreenshotsButton);
 
             RefreshBackgroundPreview();
+        }
+
+        private void OpenScreenshotsFolder()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = ScreenshotStore.GetFolder(),
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this,
+                    "Impossible d'ouvrir le dossier des captures : " + ex.Message,
+                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void OpenKeyBindings()

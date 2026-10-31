@@ -44,9 +44,8 @@ namespace Broadcaster
 
     public static class UpdateChecker
     {
-        private const string GitHubOwner = "Poaskaille";
+        private const string GitHubOwner = "Poisskaille";
         private const string GitHubRepo = "Broadcaster";
-
         private static readonly HttpClient Http = CreateClient();
 
         private static HttpClient CreateClient()
@@ -100,8 +99,8 @@ namespace Broadcaster
         {
             string url =
                 "https://api.github.com/repos/" +
-                    GitHubOwner + "/" +
-                        GitHubRepo + "/releases/tags/gold";
+                GitHubOwner + "/" +
+                GitHubRepo + "/releases/tags/gold";
 
             using (HttpResponseMessage response =
                 await Http.GetAsync(url).ConfigureAwait(false))
