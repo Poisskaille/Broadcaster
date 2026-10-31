@@ -25,6 +25,9 @@ namespace Broadcaster
         public bool AutoReloadOnStart { get; set; } = true;
         public bool HasVideoDevice => !string.IsNullOrEmpty(VideoSymbolicLink);
         public bool NoSignalDetectionEnabled { get; set; } = true;
+        public bool ClipsEnabled { get; set; } = false;
+        public int ClipDurationSeconds { get; set; } = 30;
+        public int ClipTargetFps { get; set; } = 30;
 
         private static string ConfigPath
         {
@@ -66,6 +69,8 @@ namespace Broadcaster
                 config.Bindings.Reload = ParseKey(values, "Key_Reload", config.Bindings.Reload);
                 config.Bindings.ToggleCursor = ParseKey(values, "Key_ToggleCursor", config.Bindings.ToggleCursor);
                 config.Bindings.Screenshot = ParseKey(values, "Key_Screenshot", config.Bindings.Screenshot);
+                // On conserve les anciens raccourcis, puis on choisit une touche libre pour les clips.
+                config.Bindings.Clip = ParseKey(values, "Key_Clip", config.Bindings.Clip);
                 if (!values.ContainsKey("Key_Screenshot") ||
                     config.Bindings.Screenshot == config.Bindings.OpenMenu ||
                     config.Bindings.Screenshot == config.Bindings.Reload ||
@@ -74,6 +79,20 @@ namespace Broadcaster
                 {
                     config.Bindings.Screenshot = KeyBindings.ChooseScreenshotKey(config.Bindings);
                 }
+                if (config.Bindings.Clip == KeyBindings.ReservedKey ||
+                    config.Bindings.Clip == config.Bindings.OpenMenu ||
+                    config.Bindings.Clip == config.Bindings.Reload ||
+                    config.Bindings.Clip == config.Bindings.ToggleCursor ||
+                    config.Bindings.Clip == config.Bindings.Screenshot)
+                    config.Bindings.Clip = KeyBindings.ChooseClipKey(config.Bindings);
+
+                if (values.TryGetValue("ClipsEnabled", out var ce) && bool.TryParse(ce, out var enabled))
+                    config.ClipsEnabled = enabled;
+                if (values.TryGetValue("ClipDurationSeconds", out var cds) && int.TryParse(cds, out var secs))
+                    config.ClipDurationSeconds = Math.Max(5, Math.Min(120, secs));
+                if (values.TryGetValue("ClipTargetFps", out var cfps) && int.TryParse(cfps, out var fps))
+                    config.ClipTargetFps = Math.Max(10, Math.Min(60, fps));
+
                 if (!config.Bindings.IsValid()) config.Bindings = new KeyBindings(); // garde-fou anti-enfermement
 
                 if (values.TryGetValue("AutoReloadOnStart", out var arl) && bool.TryParse(arl, out var _arl)) config.AutoReloadOnStart = _arl;
@@ -110,6 +129,10 @@ namespace Broadcaster
                     $"Key_Reload={Bindings.Reload}",
                     $"Key_ToggleCursor={Bindings.ToggleCursor}",
                     $"Key_Screenshot={Bindings.Screenshot}",
+                    $"Key_Clip={Bindings.Clip}",
+                    $"ClipsEnabled={ClipsEnabled}",
+                    $"ClipDurationSeconds={ClipDurationSeconds}",
+                    $"ClipTargetFps={ClipTargetFps}",
                     $"AutoReloadOnStart={AutoReloadOnStart}"
                 });
             }

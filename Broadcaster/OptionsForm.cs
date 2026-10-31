@@ -39,6 +39,29 @@ namespace Broadcaster
             Text = "Relancer automatiquement la capture 3 s après le démarrage (corrige le décalage du son)",
             AutoSize = true
         };
+        private readonly CheckBox _enableClipsCheck = new CheckBox
+        {
+            Text = "Activer les clips des dernières secondes", AutoSize = true
+        };
+        private readonly NumericUpDown _clipDurationInput = new NumericUpDown
+        {
+            Minimum = 5, Maximum = 120, Increment = 5, Width = 70
+        };
+        private readonly Label _clipDurationLabel = new Label { Text = "Durée du clip (secondes) :", AutoSize = true };
+        private readonly Label _clipFpsLabel = new Label { Text = "FPS cible du clip :", AutoSize = true };
+        private readonly ComboBox _clipFpsCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, Width = 90
+        };
+        private static readonly int[] ClipFpsPresets = { 15, 20, 24, 25, 30, 50, 60 };
+        private readonly Label _clipInfoLabel = new Label
+        {
+            Text = "AVI MJPEG à la résolution choisie dans Général (jusqu'à 4K).\n" +
+                   "FPS cible : selon les performances du PC ; les grands clips utilisent de la RAM.\n" +
+                   "La fenêtre doit rester visible et non recouverte (son Windows si disponible).",
+            AutoSize = true, ForeColor = Color.DimGray
+        };
+        private readonly Button _openClipsButton = new Button { Text = "Ouvrir le dossier des clips", AutoSize = true };
         private readonly Button _keyBindingsButton = new Button { Text = "Raccourcis clavier...", AutoSize = true };
         private KeyBindings _bindings;
 
@@ -210,6 +233,26 @@ namespace Broadcaster
             _openScreenshotsButton.Location = new Point(15, 165);
             _openScreenshotsButton.Click += (s, e) => OpenScreenshotsFolder();
 
+            _enableClipsCheck.Location = new Point(15, 211);
+            _enableClipsCheck.Checked = _initialConfig.ClipsEnabled;
+            _enableClipsCheck.CheckedChanged += (s, e) => RefreshClipControls();
+            _clipDurationLabel.Location = new Point(35, 246);
+            _clipDurationInput.Location = new Point(220, 242);
+            _clipDurationInput.Value = Math.Max(5, Math.Min(120, _initialConfig.ClipDurationSeconds));
+            _clipFpsLabel.Location = new Point(35, 277);
+            _clipFpsCombo.Location = new Point(220, 273);
+            foreach (int value in ClipFpsPresets) _clipFpsCombo.Items.Add(value + " FPS");
+            int fpsIndex = Array.IndexOf(ClipFpsPresets, _initialConfig.ClipTargetFps);
+            _clipFpsCombo.SelectedIndex = fpsIndex >= 0 ? fpsIndex : 4;
+            _clipInfoLabel.Location = new Point(35, 314);
+            _openClipsButton.Location = new Point(15, 380);
+            _openClipsButton.Click += (s, e) => OpenClipsFolder();
+            page.Controls.AddRange(new Control[] {
+                _enableClipsCheck, _clipDurationLabel, _clipDurationInput,
+                _clipFpsLabel, _clipFpsCombo, _clipInfoLabel, _openClipsButton
+            });
+            RefreshClipControls();
+
 
 
             // Desactivation de la feature du background automatique
@@ -226,6 +269,31 @@ namespace Broadcaster
             page.Controls.Add(_openScreenshotsButton);
 
             RefreshBackgroundPreview();
+        }
+
+        private void RefreshClipControls()
+        {
+            bool enabled = _enableClipsCheck.Checked;
+            _clipDurationLabel.Visible = enabled;
+            _clipDurationInput.Visible = enabled;
+            _clipFpsLabel.Visible = enabled;
+            _clipFpsCombo.Visible = enabled;
+            _clipInfoLabel.Visible = enabled;
+        }
+
+        private void OpenClipsFolder()
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo {
+                    FileName = ReplayClipRecorder.GetClipsFolder(), UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Impossible d'ouvrir le dossier des clips : " + ex.Message,
+                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
 
         private void OpenScreenshotsFolder()
@@ -772,6 +840,9 @@ namespace Broadcaster
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
                 NoSignalDetectionEnabled = _noSignalEnabledCheck.Checked,
                 AutoReloadOnStart = _autoReloadCheck.Checked,
+                ClipsEnabled = _enableClipsCheck.Checked,
+                ClipDurationSeconds = (int)_clipDurationInput.Value,
+                ClipTargetFps = ClipFpsPresets[Math.Max(0, _clipFpsCombo.SelectedIndex)],
                 Bindings = _bindings.Clone(),
             };
         }

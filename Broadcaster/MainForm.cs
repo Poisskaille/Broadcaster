@@ -4,11 +4,16 @@ using System.Windows.Forms;
 
 namespace Broadcaster
 {
-    public class MainForm : Form
+    public class MainForm : Form, IMessageFilter
     {
         private readonly CaptureSession _capture = new CaptureSession();
         private readonly Panel _renderSurface = new Panel();
         private AppConfig _config;
+
+        // Replay : tampon vidéo/audio des dernières secondes (désactivé par défaut).
+        private readonly ReplayClipRecorder _clipRecorder = new ReplayClipRecorder();
+        private readonly System.Windows.Forms.Timer _clipRegionTimer =
+            new System.Windows.Forms.Timer { Interval = 200 };
 
         // --- Plein écran ---
         private bool _isFullscreen;
@@ -48,6 +53,7 @@ namespace Broadcaster
             _renderSurface.BackColor = Color.Black;
             Controls.Add(_renderSurface);
             Controls.Add(_noSignalPictureBox);
+            Application.AddMessageFilter(this);
 
             Shown += MainForm_Shown;
             FormClosing += MainForm_FormClosing;
@@ -73,6 +79,10 @@ namespace Broadcaster
 
                         _capture.EnsureVideoDisplayControl();
                         _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
+                        // Le tampon est lancé directement après _capture.Start().
+                        // Ne jamais le redémarrer ici : l'évènement SessionStarted peut
+                        // arriver après les premières images et vider le tampon.
+                        UpdateClipCaptureBounds();
 
                         // Reload auto : seulement au PREMIER démarrage de la session, sinon
                         // reload -> SessionStarted -> reload -> ... en boucle.
@@ -110,6 +120,8 @@ namespace Broadcaster
                 }
             };
 
+            _clipRegionTimer.Tick += (s, e) => UpdateClipCaptureBounds();
+
             _autoReloadTimer.Tick += (s, e) =>
             {
                 _autoReloadTimer.Stop(); // une seule fois
@@ -121,6 +133,7 @@ namespace Broadcaster
         {
             _config = AppConfig.Load();
             EnterFullscreen();
+            _clipRegionTimer.Start();
 
             if (_config.NoSignalDetectionEnabled)
                 _noSignalDetector.Start();
@@ -134,6 +147,23 @@ namespace Broadcaster
         private void MainForm_ResizeEnd(object sender, EventArgs e)
         {
             ReloadCapture();
+        }
+
+        // Le moteur Media Foundation peut prendre le focus dans une fenêtre native.
+        // Un filtre des messages de CE thread WinForms récupère F10 même si
+        // ProcessCmdKey du formulaire ne le reçoit pas. Pas de raccourci global.
+        public bool PreFilterMessage(ref Message message)
+        {
+            if ((message.Msg != 0x100 && message.Msg != 0x104) ||
+                _isOptionsOpen || _config == null || !_config.ClipsEnabled ||
+                !(ContainsFocus || Form.ActiveForm == this))
+                return false;
+
+            Keys pressed = ((Keys)message.WParam.ToInt32() & Keys.KeyCode) | ModifierKeys;
+            if (pressed != _config.Bindings.Clip) return false;
+            if ((message.LParam.ToInt64() & 0x40000000) == 0)
+                TakeClip();
+            return true;
         }
 
         // ProcessCmdKey est le premier endroit où WinForms voit une touche : il reçoit TOUT
@@ -153,6 +183,7 @@ namespace Broadcaster
                 else if (keyData == _config.Bindings.Reload) action = ReloadCapture;
                 else if (keyData == _config.Bindings.ToggleCursor) action = ToggleCursorVisibility;
                 else if (keyData == _config.Bindings.Screenshot) action = TakeScreenshot;
+                else if (keyData == _config.Bindings.Clip && _config.ClipsEnabled) action = TakeClip;
 
                 if (action != null)
                 {
@@ -192,6 +223,54 @@ namespace Broadcaster
                 MessageBox.Show(this,
                     "Impossible d'enregistrer la capture d'écran : " + ex.Message,
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void UpdateClipCaptureBounds()
+        {
+            if (!_clipRecorder.IsRunning) return;
+            if (_isOptionsOpen || WindowState == FormWindowState.Minimized ||
+                !_renderSurface.IsHandleCreated || !_renderSurface.Visible ||
+                _renderSurface.ClientSize.Width <= 0 || _renderSurface.ClientSize.Height <= 0 ||
+                string.IsNullOrEmpty(_capture.ActiveVideoSymbolicLink))
+            {
+                _clipRecorder.SetCaptureBounds(Rectangle.Empty);
+                return;
+            }
+            _clipRecorder.SetCaptureBounds(new Rectangle(
+                _renderSurface.PointToScreen(Point.Empty), _renderSurface.ClientSize));
+        }
+
+        private async void TakeClip()
+        {
+            if (_isOptionsOpen || _config == null || !_config.ClipsEnabled ||
+                _clipRecorder.IsSaving)
+                return;
+
+            if (!_clipRecorder.IsRunning)
+            {
+                _clipRecorder.WriteDiagnostic("F10 : le tampon des clips n'est pas démarré.");
+                MessageBox.Show(this, "Le tampon de clips n'est pas démarré. " +
+                    "Vérifie la capture vidéo et réessaie.",
+                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            try
+            {
+                await _clipRecorder.SaveReplayAsync();
+                // Pas d'overlay de débogage sur la vidéo : seule une confirmation sonore.
+                try { System.Media.SystemSounds.Asterisk.Play(); } catch { }
+            }
+            catch (Exception ex)
+            {
+                _clipRecorder.WriteDiagnostic("Echec d'enregistrement : " + ex);
+                if (!IsDisposed && IsHandleCreated)
+                {
+                    MessageBox.Show(this, "Impossible d'enregistrer le clip : " + ex.Message +
+                        "\n\nJournal : " + _clipRecorder.DiagnosticPath,
+                        "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
         }
 
@@ -289,6 +368,8 @@ namespace Broadcaster
             bool cursorWasHidden = _cursorHidden;
             SetCursorHidden(false);
             _isOptionsOpen = true;
+            _clipRecorder.SetCaptureBounds(Rectangle.Empty);
+            _clipRecorder.ClearBuffer();
 
             try
             {
@@ -318,12 +399,15 @@ namespace Broadcaster
             {
                 _isOptionsOpen = false;
                 SetCursorHidden(cursorWasHidden);
+                UpdateClipCaptureBounds();
             }
         }
 
         // --- Capture ---
         private void StartCaptureFromConfig()
         {
+            // L'ancienne session ne doit pas rester dans le replay après un reload.
+            _clipRecorder.Stop();
             try
             {
                 var videoDevices = MediaEngine.EnumerateVideoDevices();
@@ -352,6 +436,24 @@ namespace Broadcaster
 
                 _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle, _config.Width, _config.Height);
                 _capture.SetVolume(_config.Volume);
+
+                // Lancer le tampon SANS attendre SessionStarted : le callback n'est
+                // pas garanti sur tous les pilotes/carte de capture.
+                if (_config.ClipsEnabled)
+                {
+                    try
+                    {
+                        _clipRecorder.Start(_config.ClipDurationSeconds, _config.AudioEndpointId,
+                            _config.Width, _config.Height, _config.ClipTargetFps);
+                        UpdateClipCaptureBounds();
+                    }
+                    catch (Exception clipError)
+                    {
+                        _clipRecorder.WriteDiagnostic("Démarrage du tampon impossible : " + clipError);
+                        MessageBox.Show(this, "Impossible de démarrer les clips : " + clipError.Message,
+                            "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -362,6 +464,18 @@ namespace Broadcaster
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
+            if (_clipRecorder.IsSaving)
+            {
+                MessageBox.Show(this,
+                    "Un clip est en cours d'écriture. Réessaie de fermer Broadcaster après le son de confirmation.",
+                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                e.Cancel = true;
+                return;
+            }
+            Application.RemoveMessageFilter(this);
+            _clipRegionTimer.Stop();
+            _clipRegionTimer.Dispose();
+            _clipRecorder.Dispose();
             _autoReloadTimer.Stop();
             _autoReloadTimer.Dispose();
             _noSignalDetector?.Dispose();
