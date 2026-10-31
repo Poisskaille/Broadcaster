@@ -16,6 +16,9 @@ namespace Broadcaster
         private readonly ComboBox _resolutionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
 
         private readonly ComboBox _screenCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+
+        private readonly Button _checkUpdateButton = new Button { Text = "Rechercher une mise à jour", AutoSize = true };
+        private readonly Label _updateStatusLabel = new Label { AutoSize = true, MaximumSize = new Size(460, 0) };
         private Screen[] _orderedScreens;
 
         private static readonly (string Label, int Width, int Height)[] ResolutionPresets = new[]
@@ -189,6 +192,14 @@ namespace Broadcaster
             _keyBindingsButton.Location = new Point(15, 45);
             _keyBindingsButton.Click += (s, e) => OpenKeyBindings();
 
+            _checkUpdateButton.Location = new Point(15, 80);
+            _checkUpdateButton.Click += (s, e) => CheckForUpdate();
+
+            _updateStatusLabel.Location = new Point(200, 85);
+            _updateStatusLabel.Text = $"Version actuelle : {UpdateChecker.CurrentVersion}";
+
+
+
             // Desactivation de la feature du background automatique
             //page.Controls.Add(label);
             //page.Controls.Add(_backgroundPreview);
@@ -197,6 +208,8 @@ namespace Broadcaster
             //page.Controls.Add(_noSignalEnabledCheck);
             page.Controls.Add(_autoReloadCheck);
             page.Controls.Add(_keyBindingsButton);
+            page.Controls.Add(_checkUpdateButton);
+            page.Controls.Add(_updateStatusLabel);
 
             RefreshBackgroundPreview();
         }
@@ -207,6 +220,32 @@ namespace Broadcaster
             {
                 if (form.ShowDialog(this) == DialogResult.OK)
                     _bindings = form.Result;
+            }
+        }
+
+        private async void CheckForUpdate()
+        {
+            _checkUpdateButton.Enabled = false;
+            _updateStatusLabel.Text = "Recherche en cours...";
+
+            try
+            {
+                var info = await UpdateChecker.CheckAsync();
+
+                if (!info.IsNewer)
+                    _updateStatusLabel.Text = $"À jour (version {UpdateChecker.CurrentVersion}).";
+                else if (info.DownloadUrl == null)
+                    _updateStatusLabel.Text = $"Version {info.LatestVersion} disponible, mais la release ne contient pas de fichier .zip.";
+                else
+                    _updateStatusLabel.Text = $"Version {info.LatestVersion} disponible (actuelle : {UpdateChecker.CurrentVersion}). Fichier : {info.AssetName}";
+            }
+            catch (Exception ex)
+            {
+                _updateStatusLabel.Text = "Impossible de vérifier : " + ex.Message;
+            }
+            finally
+            {
+                _checkUpdateButton.Enabled = true;
             }
         }
 
