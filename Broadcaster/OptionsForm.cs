@@ -19,6 +19,9 @@ namespace Broadcaster
         private readonly ComboBox _screenCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
 
         private readonly Button _checkUpdateButton = new Button { Text = "Rechercher une mise à jour", AutoSize = true };
+        private readonly Button _installUpdateButton = new Button { Text = "Installer la mise à jour", AutoSize = true, Visible = false };
+        private UpdateInfo _availableUpdate;
+        private bool _isInstallingUpdate;
         private readonly Button _openScreenshotsButton = new Button { Text = "Ouvrir le dossier des captures", AutoSize = true };
         private readonly Label _updateStatusLabel = new Label { AutoSize = true, MaximumSize = new Size(460, 0) };
         private Screen[] _orderedScreens;
@@ -197,10 +200,14 @@ namespace Broadcaster
             _checkUpdateButton.Location = new Point(15, 80);
             _checkUpdateButton.Click += (s, e) => CheckForUpdate();
 
-            _updateStatusLabel.Location = new Point(200, 85);
+            _updateStatusLabel.Location = new Point(225, 80);
+            _updateStatusLabel.MaximumSize = new Size(420, 65);
             _updateStatusLabel.Text = $"Version actuelle : {UpdateChecker.CurrentVersion}";
 
-            _openScreenshotsButton.Location = new Point(15, 120);
+            _installUpdateButton.Location = new Point(15, 120);
+            _installUpdateButton.Click += async (s, e) => await InstallAvailableUpdateAsync();
+
+            _openScreenshotsButton.Location = new Point(15, 165);
             _openScreenshotsButton.Click += (s, e) => OpenScreenshotsFolder();
 
 
@@ -214,6 +221,7 @@ namespace Broadcaster
             page.Controls.Add(_autoReloadCheck);
             page.Controls.Add(_keyBindingsButton);
             page.Controls.Add(_checkUpdateButton);
+            page.Controls.Add(_installUpdateButton);
             page.Controls.Add(_updateStatusLabel);
             page.Controls.Add(_openScreenshotsButton);
 
@@ -249,6 +257,8 @@ namespace Broadcaster
 
         private async void CheckForUpdate()
         {
+            _availableUpdate = null;
+            _installUpdateButton.Visible = false;
             _checkUpdateButton.Enabled = false;
             _updateStatusLabel.Text = "Recherche en cours...";
 
@@ -257,11 +267,20 @@ namespace Broadcaster
                 var info = await UpdateChecker.CheckAsync();
 
                 if (!info.IsNewer)
-                    _updateStatusLabel.Text = $"À jour (version {UpdateChecker.CurrentVersion}).";
-                else if (info.DownloadUrl == null)
-                    _updateStatusLabel.Text = $"Version {info.LatestVersion} disponible, mais la release ne contient pas de fichier .zip.";
+                {
+                    _updateStatusLabel.Text = $"Application à jour (version {UpdateChecker.CurrentVersion}).";
+                }
+                else if (string.IsNullOrWhiteSpace(info.DownloadUrl))
+                {
+                    _updateStatusLabel.Text = $"Version {info.LatestVersion} disponible, mais aucune archive ZIP n'est jointe à la release.";
+                }
                 else
-                    _updateStatusLabel.Text = $"Version {info.LatestVersion} disponible (actuelle : {UpdateChecker.CurrentVersion}). Fichier : {info.AssetName}";
+                {
+                    _availableUpdate = info;
+                    _updateStatusLabel.Text = $"Nouvelle version {info.LatestVersion} disponible ! (actuelle : {UpdateChecker.CurrentVersion})";
+                    _installUpdateButton.Text = $"Mettre à jour vers {info.LatestVersion}";
+                    _installUpdateButton.Visible = true;
+                }
             }
             catch (Exception ex)
             {
@@ -269,7 +288,62 @@ namespace Broadcaster
             }
             finally
             {
-                _checkUpdateButton.Enabled = true;
+                if (!IsDisposed)
+                    _checkUpdateButton.Enabled = true;
+            }
+        }
+
+        private async System.Threading.Tasks.Task InstallAvailableUpdateAsync()
+        {
+            UpdateInfo info = _availableUpdate;
+            if (_isInstallingUpdate || info == null || !info.IsNewer)
+                return;
+
+            if (MessageBox.Show(this,
+                $"Installer Broadcaster {info.LatestVersion} depuis GitHub ?\n\n" +
+                $"Fichier : {info.AssetName}\n\n" +
+                "L'application se fermera, ses fichiers seront remplacés, puis elle redémarrera. " +
+                "Les paramètres utilisateur seront conservés.",
+                "Mise à jour de Broadcaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+
+            _isInstallingUpdate = true;
+            _checkUpdateButton.Enabled = false;
+            _installUpdateButton.Enabled = false;
+            _okButton.Enabled = false;
+            _cancelButton.Enabled = false;
+            _updateStatusLabel.Text = "Téléchargement de la mise à jour...";
+
+            try
+            {
+                var progress = new Progress<int>(percent =>
+                {
+                    if (!IsDisposed)
+                        _updateStatusLabel.Text = $"Téléchargement : {percent}%";
+                });
+
+                await UpdateInstaller.PrepareAndLaunchAsync(info, progress);
+                _updateStatusLabel.Text = "Téléchargement terminé. Fermeture pour installation...";
+                _isInstallingUpdate = false;
+                // Le script attendra la fermeture effective (libération de Broadcaster.exe).
+                Application.Exit();
+            }
+            catch (Exception ex)
+            {
+                _updateStatusLabel.Text = "Mise à jour impossible : " + ex.Message;
+                MessageBox.Show(this, "La mise à jour n'a pas été installée :\n" + ex.Message,
+                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                _isInstallingUpdate = false;
+                if (!IsDisposed)
+                {
+                    _checkUpdateButton.Enabled = true;
+                    _installUpdateButton.Enabled = true;
+                    _okButton.Enabled = true;
+                    _cancelButton.Enabled = true;
+                }
             }
         }
 
@@ -704,6 +778,12 @@ namespace Broadcaster
 
         private void OptionsForm_FormClosing(object sender, FormClosingEventArgs e)
         {
+            if (_isInstallingUpdate)
+            {
+                e.Cancel = true;
+                return;
+            }
+
             if (DialogResult != DialogResult.OK)
                 RestoreOriginalColorValues();
         }
