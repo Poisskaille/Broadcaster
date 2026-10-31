@@ -8,9 +8,16 @@ namespace Broadcaster
     {
         private readonly CaptureSession _capture = new CaptureSession();
         private readonly Panel _renderSurface = new Panel();
+        private AppConfig _config;
 
+        // --- Plein écran ---
+        private bool _isFullscreen;
+        private FormWindowState _previousState;
+        private FormBorderStyle _previousBorderStyle;
+        private Rectangle _previousBounds;
+
+        // --- Image "pas de signal" ---
         private const int NoSignalBorderMargin = 8;
-
         private readonly PictureBox _noSignalPictureBox = new PictureBox
         {
             SizeMode = PictureBoxSizeMode.Zoom,
@@ -18,32 +25,33 @@ namespace Broadcaster
             Visible = false
         };
         private NoSignalDetector _noSignalDetector;
-        private AppConfig _config;
 
-        private bool _isFullscreen;
-        private FormWindowState _previousState;
-        private FormBorderStyle _previousBorderStyle;
-        private Rectangle _previousBounds;
+        // --- Reload automatique au démarrage ---
+        private const int AutoReloadDelayMs = 3000;
+        private readonly System.Windows.Forms.Timer _autoReloadTimer = new System.Windows.Forms.Timer { Interval = AutoReloadDelayMs };
+        private bool _autoReloadScheduled;
+
+        // --- Menu options / curseur ---
+        private bool _isOptionsOpen;
+        private bool _cursorHidden;
 
         public MainForm()
         {
             Text = "Broadcaster";
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             BackColor = Color.Black;
-            KeyPreview = true;
             DoubleBuffered = true;
             StartPosition = FormStartPosition.Manual;
             Bounds = Screen.PrimaryScreen.Bounds;
-
 
             _renderSurface.Dock = DockStyle.Fill;
             _renderSurface.BackColor = Color.Black;
             Controls.Add(_renderSurface);
             Controls.Add(_noSignalPictureBox);
 
-            KeyDown += MainForm_KeyDown;
             Shown += MainForm_Shown;
             FormClosing += MainForm_FormClosing;
+            ResizeEnd += MainForm_ResizeEnd;
 
             _capture.OnError += message =>
             {
@@ -65,6 +73,14 @@ namespace Broadcaster
 
                         _capture.EnsureVideoDisplayControl();
                         _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
+
+                        // Reload auto : seulement au PREMIER démarrage de la session, sinon
+                        // reload -> SessionStarted -> reload -> ... en boucle.
+                        if (_config != null && _config.AutoReloadOnStart && !_autoReloadScheduled)
+                        {
+                            _autoReloadScheduled = true;
+                            _autoReloadTimer.Start();
+                        }
                     }));
                 }
             };
@@ -74,8 +90,6 @@ namespace Broadcaster
                 _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
                 UpdateNoSignalBounds();
             };
-
-            ResizeEnd += MainForm_ResizeEnd;
 
             _noSignalDetector = new NoSignalDetector(SampleIsDark, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
             _noSignalDetector.NoSignalStateChanged += noSignal =>
@@ -95,8 +109,79 @@ namespace Broadcaster
                     _noSignalPictureBox.Visible = false;
                 }
             };
+
+            _autoReloadTimer.Tick += (s, e) =>
+            {
+                _autoReloadTimer.Stop(); // une seule fois
+                if (!_isOptionsOpen) ReloadCapture();
+            };
         }
 
+        private void MainForm_Shown(object sender, EventArgs e)
+        {
+            _config = AppConfig.Load();
+            EnterFullscreen();
+
+            if (_config.NoSignalDetectionEnabled)
+                _noSignalDetector.Start();
+
+            if (_config.HasVideoDevice)
+                StartCaptureFromConfig();
+            else
+                OpenOptions();
+        }
+
+        private void MainForm_ResizeEnd(object sender, EventArgs e)
+        {
+            ReloadCapture();
+        }
+
+        // ProcessCmdKey est le premier endroit où WinForms voit une touche : il reçoit TOUT
+        // (Échap, Tab, flèches...), contrairement à KeyDown. Même mécanisme que la fenêtre
+        // de configuration des raccourcis, donc toute touche assignable fonctionne ici.
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (_config != null)
+            {
+                // Bit 30 de lParam = touche déjà enfoncée avant ce message (répétition
+                // automatique). On l'ignore : maintenir R ne doit pas relancer en rafale.
+                bool isRepeat = (msg.LParam.ToInt64() & 0x40000000) != 0;
+
+                Action action = null;
+                if (keyData == KeyBindings.ReservedKey) action = () => { ToggleFullscreen(); ReloadCapture(); };
+                else if (keyData == _config.Bindings.OpenMenu) action = OpenOptions;
+                else if (keyData == _config.Bindings.Reload) action = ReloadCapture;
+                else if (keyData == _config.Bindings.ToggleCursor) action = ToggleCursorVisibility;
+
+                if (action != null)
+                {
+                    if (!isRepeat) action();
+                    return true;
+                }
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private void ReloadCapture()
+        {
+            if (_config != null && _config.HasVideoDevice)
+                StartCaptureFromConfig();
+        }
+
+        // --- Curseur ---
+        // Cursor.Hide() / Cursor.Show() sont comptés : deux Hide() demandent deux Show() pour
+        // revenir. On mémorise donc l'état nous-mêmes et on n'appelle jamais deux fois dans
+        // le même sens.
+        private void SetCursorHidden(bool hidden)
+        {
+            if (hidden == _cursorHidden) return;
+            _cursorHidden = hidden;
+            if (hidden) Cursor.Hide(); else Cursor.Show();
+        }
+
+        private void ToggleCursorVisibility() => SetCursorHidden(!_cursorHidden);
+
+        // --- Plein écran / écran cible ---
         private Screen GetTargetScreen()
         {
             if (_config != null && !string.IsNullOrEmpty(_config.DisplayDeviceName))
@@ -105,62 +190,6 @@ namespace Broadcaster
                 if (match != null) return match;
             }
             return Screen.PrimaryScreen;
-        }
-
-        private void UpdateNoSignalBounds()
-        {
-            var r = _renderSurface.Bounds;
-            _noSignalPictureBox.Bounds = new Rectangle(
-                r.Left + NoSignalBorderMargin,
-                r.Top + NoSignalBorderMargin,
-                Math.Max(0, r.Width - NoSignalBorderMargin * 2),
-                Math.Max(0, r.Height - NoSignalBorderMargin * 2));
-        }
-        private bool SampleIsDark()
-        {
-            return ScreenDarknessSampler.IsControlDark(_renderSurface, _noSignalPictureBox.Visible);
-        }
-
-        private void MainForm_ResizeEnd(object sender, EventArgs e)
-        {
-            if (_config != null && _config.HasVideoDevice)
-                StartCaptureFromConfig();
-        }
-
-        private void MainForm_Shown(object sender, EventArgs e)
-        {
-            Cursor.Show();
-            _config = AppConfig.Load();
-            if (_config.NoSignalDetectionEnabled)
-                _noSignalDetector.Start();
-
-            EnterFullscreen();
-
-            if (_config.HasVideoDevice)
-                StartCaptureFromConfig();
-            else
-                OpenOptions();
-        }
-
-        private void MainForm_KeyDown(object sender, KeyEventArgs e)
-        {
-            if (e.KeyCode == Keys.F11)
-            {
-                ToggleFullscreen();
-                if (_config != null && _config.HasVideoDevice)
-                    StartCaptureFromConfig();
-                e.Handled = true;
-            }
-            else if (e.KeyCode == Keys.Escape)
-            {
-                OpenOptions();
-                e.Handled = true;
-            }
-            else if (e.KeyCode == Keys.R)
-            {
-                StartCaptureFromConfig();
-                e.Handled = true;
-            }
         }
 
         private void ToggleFullscreen()
@@ -187,16 +216,6 @@ namespace Broadcaster
             _isFullscreen = true;
         }
 
-        private void MoveFullscreenToConfiguredScreen()
-        {
-            if (!_isFullscreen) return;
-
-            var targetScreen = GetTargetScreen();
-            WindowState = FormWindowState.Normal;
-            Bounds = targetScreen.Bounds;
-            WindowState = FormWindowState.Maximized;
-        }
-
         private void ExitFullscreen()
         {
             if (!_isFullscreen) return;
@@ -209,35 +228,73 @@ namespace Broadcaster
             _isFullscreen = false;
         }
 
-        private void OpenOptions()
+        // Si on change d'écran dans les options PENDANT qu'on est déjà en plein écran.
+        private void MoveFullscreenToConfiguredScreen()
         {
-            bool wasFullscreen = _isFullscreen;
-            Cursor.Show();
+            if (!_isFullscreen) return;
 
-            using (var form = new OptionsForm(_config, _capture))
-            {
-                if (form.ShowDialog(this) == DialogResult.OK)
-                {
-                    _config = form.ResultConfig;
-                    _config.Save();
-                    MoveFullscreenToConfiguredScreen();
-                    StartCaptureFromConfig();
-                }
-            }
-
-            if (_config.NoSignalDetectionEnabled)
-            {
-                _noSignalDetector.Start(); // sans effet si déjà démarré
-            }
-            else
-            {
-                _noSignalDetector.Stop();
-                _noSignalPictureBox.Visible = false; // au cas où l'image était affichée au moment de la désactivation
-            }
-
-            if (wasFullscreen && _isFullscreen) Cursor.Hide();
+            var targetScreen = GetTargetScreen();
+            WindowState = FormWindowState.Normal;
+            Bounds = targetScreen.Bounds;
+            WindowState = FormWindowState.Maximized;
         }
 
+        // --- Image "pas de signal" ---
+        private bool SampleIsDark()
+        {
+            return ScreenDarknessSampler.IsControlDark(_renderSurface, _noSignalPictureBox.Visible);
+        }
+
+        private void UpdateNoSignalBounds()
+        {
+            var r = _renderSurface.Bounds;
+            _noSignalPictureBox.Bounds = new Rectangle(
+                r.Left + NoSignalBorderMargin,
+                r.Top + NoSignalBorderMargin,
+                Math.Max(0, r.Width - NoSignalBorderMargin * 2),
+                Math.Max(0, r.Height - NoSignalBorderMargin * 2));
+        }
+
+        // --- Options ---
+        private void OpenOptions()
+        {
+            // Le curseur doit être visible pour utiliser la fenêtre d'options ; on restaure l'état après.
+            bool cursorWasHidden = _cursorHidden;
+            SetCursorHidden(false);
+            _isOptionsOpen = true;
+
+            try
+            {
+                using (var form = new OptionsForm(_config, _capture))
+                {
+                    if (form.ShowDialog(this) == DialogResult.OK)
+                    {
+                        _config = form.ResultConfig;
+                        _config.Save();
+                        MoveFullscreenToConfiguredScreen();
+
+                        if (_config.NoSignalDetectionEnabled)
+                        {
+                            _noSignalDetector.Start();
+                        }
+                        else
+                        {
+                            _noSignalDetector.Stop();
+                            _noSignalPictureBox.Visible = false;
+                        }
+
+                        StartCaptureFromConfig();
+                    }
+                }
+            }
+            finally
+            {
+                _isOptionsOpen = false;
+                SetCursorHidden(cursorWasHidden);
+            }
+        }
+
+        // --- Capture ---
         private void StartCaptureFromConfig()
         {
             try
@@ -247,7 +304,7 @@ namespace Broadcaster
 
                 if (videoDevice == null)
                 {
-                    MessageBox.Show(this, "Le périphérique vidéo configuré est introuvable. Ouvre les options (Échap) pour en choisir un autre.",
+                    MessageBox.Show(this, "Le périphérique vidéo configuré est introuvable. Ouvre les options pour en choisir un autre.",
                         "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
@@ -278,8 +335,10 @@ namespace Broadcaster
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            _capture.Dispose();
+            _autoReloadTimer.Stop();
+            _autoReloadTimer.Dispose();
             _noSignalDetector?.Dispose();
+            _capture.Dispose();
         }
     }
 }

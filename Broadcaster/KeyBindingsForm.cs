@@ -1,0 +1,209 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using System.Windows.Forms;
+
+namespace Broadcaster
+{
+    public class KeyBindings
+    {
+        // F11 reste fixe (plein écran), non reconfigurable.
+        public static readonly Keys ReservedKey = Keys.F11;
+
+        public Keys OpenMenu { get; set; } = Keys.Escape;
+        public Keys Reload { get; set; } = Keys.R;
+        public Keys ToggleCursor { get; set; } = Keys.T;
+
+        public KeyBindings Clone() => new KeyBindings { OpenMenu = OpenMenu, Reload = Reload, ToggleCursor = ToggleCursor };
+
+        public bool IsValid()
+        {
+            var all = new[] { OpenMenu, Reload, ToggleCursor };
+            return all.Distinct().Count() == all.Length && !all.Contains(ReservedKey);
+        }
+    }
+
+    public class KeyBindingsForm : Form
+    {
+        private enum BindingAction { OpenMenu, Reload, ToggleCursor }
+
+        private static readonly Keys[] ModifierOnlyKeys =
+        {
+            Keys.ShiftKey, Keys.ControlKey, Keys.Menu,
+            Keys.LShiftKey, Keys.RShiftKey, Keys.LControlKey, Keys.RControlKey,
+            Keys.LMenu, Keys.RMenu, Keys.LWin, Keys.RWin
+        };
+
+        private static readonly Dictionary<BindingAction, string> Titles = new Dictionary<BindingAction, string>
+        {
+            { BindingAction.OpenMenu, "Ouvrir le menu" },
+            { BindingAction.Reload, "Relancer la capture" },
+            { BindingAction.ToggleCursor, "Afficher / masquer le curseur" }
+        };
+
+        private readonly KeyBindings _working;
+        private readonly Dictionary<BindingAction, Label> _keyLabels = new Dictionary<BindingAction, Label>();
+        private readonly Dictionary<BindingAction, Button> _changeButtons = new Dictionary<BindingAction, Button>();
+        private readonly Label _statusLabel = new Label { ForeColor = Color.DarkRed };
+        private BindingAction? _capturing;
+
+        public KeyBindings Result { get; private set; }
+
+        public KeyBindingsForm(KeyBindings current)
+        {
+            _working = current.Clone();
+
+            Text = "Raccourcis clavier";
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ClientSize = new Size(480, 230);
+
+            int y = 20;
+            foreach (BindingAction action in Enum.GetValues(typeof(BindingAction)))
+                AddRow(action, ref y);
+
+            _statusLabel.Location = new Point(15, y);
+            _statusLabel.Size = new Size(450, 20);
+
+            var note = new Label
+            {
+                Text = "F11 (plein écran) reste fixe.",
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Location = new Point(15, y + 25)
+            };
+
+            var resetButton = new Button { Text = "Réinitialiser", Size = new Size(100, 28), Location = new Point(15, 190) };
+            var saveButton = new Button { Text = "Enregistrer", Size = new Size(90, 28), DialogResult = DialogResult.OK, Location = new Point(285, 190) };
+            var cancelButton = new Button { Text = "Annuler", Size = new Size(90, 28), DialogResult = DialogResult.Cancel, Location = new Point(380, 190) };
+
+            resetButton.Click += (s, e) => ResetToDefaults();
+            saveButton.Click += (s, e) => Result = _working.Clone();
+
+            Controls.AddRange(new Control[] { _statusLabel, note, resetButton, saveButton, cancelButton });
+            RefreshLabels();
+        }
+
+        private void AddRow(BindingAction action, ref int y)
+        {
+            var title = new Label { Text = Titles[action] + " :", AutoSize = true, Location = new Point(15, y + 5) };
+            var keyLabel = new Label
+            {
+                BorderStyle = BorderStyle.FixedSingle,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(150, 26),
+                Location = new Point(235, y)
+            };
+            var change = new Button { Size = new Size(72, 26), Location = new Point(393, y) };
+            change.Click += (s, e) => ToggleCapture(action);
+
+            _keyLabels[action] = keyLabel;
+            _changeButtons[action] = change;
+            Controls.AddRange(new Control[] { title, keyLabel, change });
+            y += 40;
+        }
+
+        // ProcessCmdKey est appelé AVANT le traitement des touches de dialogue (Échap, Entrée, Tab...)
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (!_capturing.HasValue)
+                return base.ProcessCmdKey(ref msg, keyData);
+
+            Keys key = keyData & Keys.KeyCode;
+            if (key != Keys.None && !ModifierOnlyKeys.Contains(key))
+                AssignKey(_capturing.Value, key);
+
+            return true; // on avale TOUTES les touches pendant la capture
+        }
+
+        private void ToggleCapture(BindingAction action)
+        {
+            _capturing = _capturing == action ? (BindingAction?)null : action;
+            _statusLabel.Text = "";
+            RefreshLabels();
+        }
+
+        private void AssignKey(BindingAction action, Keys key)
+        {
+            if (key == KeyBindings.ReservedKey)
+            {
+                _statusLabel.Text = "F11 est réservée au plein écran.";
+                return;
+            }
+
+            foreach (BindingAction other in Enum.GetValues(typeof(BindingAction)))
+            {
+                if (other != action && GetKey(other) == key)
+                {
+                    _statusLabel.Text = $"{FormatKey(key)} est déjà utilisée pour « {Titles[other]} ».";
+                    return;
+                }
+            }
+
+            SetKey(action, key);
+            _capturing = null;
+            _statusLabel.Text = "";
+            RefreshLabels();
+        }
+
+        private void ResetToDefaults()
+        {
+            var defaults = new KeyBindings();
+            _working.OpenMenu = defaults.OpenMenu;
+            _working.Reload = defaults.Reload;
+            _working.ToggleCursor = defaults.ToggleCursor;
+            _capturing = null;
+            _statusLabel.Text = "";
+            RefreshLabels();
+        }
+
+        private Keys GetKey(BindingAction action)
+        {
+            switch (action)
+            {
+                case BindingAction.OpenMenu: return _working.OpenMenu;
+                case BindingAction.Reload: return _working.Reload;
+                default: return _working.ToggleCursor;
+            }
+        }
+
+        private void SetKey(BindingAction action, Keys key)
+        {
+            switch (action)
+            {
+                case BindingAction.OpenMenu: _working.OpenMenu = key; break;
+                case BindingAction.Reload: _working.Reload = key; break;
+                default: _working.ToggleCursor = key; break;
+            }
+        }
+
+        private void RefreshLabels()
+        {
+            foreach (BindingAction action in Enum.GetValues(typeof(BindingAction)))
+            {
+                bool isCapturing = _capturing == action;
+                _keyLabels[action].Text = isCapturing ? "Appuie sur une touche" : FormatKey(GetKey(action));
+                _keyLabels[action].BackColor = isCapturing ? Color.LightYellow : SystemColors.Control;
+                _changeButtons[action].Text = isCapturing ? "Annuler" : "Modifier";
+            }
+        }
+
+        private static string FormatKey(Keys key)
+        {
+            switch (key)
+            {
+                case Keys.Escape: return "Échap";
+                case Keys.Return: return "Entrée";
+                case Keys.Space: return "Espace";
+                case Keys.Back: return "Retour arrière";
+                default:
+                    string s = key.ToString();
+                    if (s.Length == 2 && s[0] == 'D' && char.IsDigit(s[1])) return s.Substring(1); // D1 -> 1
+                    return s;
+            }
+        }
+    }
+}

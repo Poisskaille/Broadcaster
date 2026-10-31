@@ -26,6 +26,14 @@ namespace Broadcaster
         ("3840 x 2160 (4K UHD)", 3840, 2160),
 };
 
+        private readonly CheckBox _autoReloadCheck = new CheckBox
+        {
+            Text = "Relancer automatiquement la capture 3 s après le démarrage (corrige le décalage du son)",
+            AutoSize = true
+        };
+        private readonly Button _keyBindingsButton = new Button { Text = "Raccourcis clavier...", AutoSize = true };
+        private KeyBindings _bindings;
+
         // --- Onglet Vidéo ---
         private readonly ComboBox _profileCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly Button _newProfileButton = new Button { Text = "Nouveau profil...", AutoSize = true };
@@ -83,6 +91,7 @@ namespace Broadcaster
         public OptionsForm(AppConfig currentConfig, CaptureSession captureSession)
         {
             _initialConfig = currentConfig;
+            _bindings = currentConfig.Bindings.Clone();
             _captureSession = captureSession;
 
             Text = "Options - Broadcaster";
@@ -119,8 +128,6 @@ namespace Broadcaster
             tabs.TabPages.Add(extrasTab);
 
             BuildExtrasTab(extrasTab);
-
-
             BuildGeneralTab(generalTab);
             BuildVideoTab(videoTab);
 
@@ -164,25 +171,43 @@ namespace Broadcaster
                 Location = new Point(15, 15)
             };
 
-            _backgroundPreview.Location = new Point(15, 45);
-            _backgroundPreview.Size = new Size(320, 180);
+            //_backgroundPreview.Location = new Point(15, 45);
+            //_backgroundPreview.Size = new Size(320, 180);
 
-            _chooseBackgroundButton.Location = new Point(350, 45);
-            _clearBackgroundButton.Location = new Point(350, 80);
+            //_chooseBackgroundButton.Location = new Point(350, 45);
+            //_clearBackgroundButton.Location = new Point(350, 80);
 
-            _chooseBackgroundButton.Click += (s, e) => ChooseBackgroundImage();
-            _clearBackgroundButton.Click += (s, e) => ClearBackgroundImage();
+            //_chooseBackgroundButton.Click += (s, e) => ChooseBackgroundImage();
+            //_clearBackgroundButton.Click += (s, e) => ClearBackgroundImage();
 
-            _noSignalEnabledCheck.Location = new Point(15, 240);
-            _noSignalEnabledCheck.Checked = _initialConfig.NoSignalDetectionEnabled;
+            //_noSignalEnabledCheck.Location = new Point(15, 240);
+            //_noSignalEnabledCheck.Checked = _initialConfig.NoSignalDetectionEnabled;
 
-            page.Controls.Add(label);
-            page.Controls.Add(_backgroundPreview);
-            page.Controls.Add(_chooseBackgroundButton);
-            page.Controls.Add(_clearBackgroundButton);
-            page.Controls.Add(_noSignalEnabledCheck);
+            _autoReloadCheck.Location = new Point(15, 15);
+            _autoReloadCheck.Checked = _initialConfig.AutoReloadOnStart;
+
+            _keyBindingsButton.Location = new Point(15, 45);
+            _keyBindingsButton.Click += (s, e) => OpenKeyBindings();
+
+            // Desactivation de la feature du background automatique
+            //page.Controls.Add(label);
+            //page.Controls.Add(_backgroundPreview);
+            //page.Controls.Add(_chooseBackgroundButton);
+            //page.Controls.Add(_clearBackgroundButton);
+            //page.Controls.Add(_noSignalEnabledCheck);
+            page.Controls.Add(_autoReloadCheck);
+            page.Controls.Add(_keyBindingsButton);
 
             RefreshBackgroundPreview();
+        }
+
+        private void OpenKeyBindings()
+        {
+            using (var form = new KeyBindingsForm(_bindings))
+            {
+                if (form.ShowDialog(this) == DialogResult.OK)
+                    _bindings = form.Result;
+            }
         }
 
         private void RefreshBackgroundPreview()
@@ -233,34 +258,32 @@ namespace Broadcaster
             _resolutionCombo.Location = new Point(15, 98);
             _resolutionCombo.Width = 250;
 
-            var volumeTitle = new Label { Text = "Volume :", AutoSize = true, Location = new Point(15, 195) };
-            _volumeTrack.Location = new Point(15, 218);
+            var volumeTitle = new Label { Text = "Volume :", AutoSize = true, Location = new Point(15, 135) };
+            _volumeTrack.Location = new Point(15, 158);
             _volumeTrack.Width = 320;
             _volumeTrack.ValueChanged += (s, e) => _volumeLabel.Text = $"{_volumeTrack.Value}%";
-            _volumeLabel.Location = new Point(345, 225);
+            _volumeLabel.Location = new Point(345, 165);
 
-            var videoLabel = new Label { Text = "Capture Source :", AutoSize = true, Location = new Point(15, 260) };
-            _videoCombo.Location = new Point(15, 283);
+            var videoLabel = new Label { Text = "Capture Source :", AutoSize = true, Location = new Point(15, 200) };
+            _videoCombo.Location = new Point(15, 223);
             _videoCombo.Width = 405;
 
-            var audioCaptureLabel = new Label { Text = "Audio Capture (if need to separate audio and video)", AutoSize = true, Location = new Point(15, 320) };
-            _audioCaptureCombo.Location = new Point(15, 343);
+            var audioCaptureLabel = new Label { Text = "Audio Capture (if need to separate audio and video)", AutoSize = true, Location = new Point(15, 260) };
+            _audioCaptureCombo.Location = new Point(15, 283);
             _audioCaptureCombo.Width = 405;
 
-            var audioOutputLabel = new Label { Text = "Audio Output :", AutoSize = true, Location = new Point(15, 385) };
-            _audioOutputCombo.Location = new Point(15, 408);
+            var audioOutputLabel = new Label { Text = "Audio Output :", AutoSize = true, Location = new Point(15, 320) };
+            _audioOutputCombo.Location = new Point(15, 343);
             _audioOutputCombo.Width = 405;
 
             page.Controls.AddRange(new Control[]
             {
-                                screenLabel, _screenCombo,
-                videoLabel, _videoCombo,
-                audioCaptureLabel, _audioCaptureCombo,
-                audioOutputLabel, _audioOutputCombo,
-                volumeTitle, _volumeTrack, _volumeLabel,
-                resolutionLabel, _resolutionCombo,
-
-
+        screenLabel, _screenCombo,
+        resolutionLabel, _resolutionCombo,
+        volumeTitle, _volumeTrack, _volumeLabel,
+        videoLabel, _videoCombo,
+        audioCaptureLabel, _audioCaptureCombo,
+        audioOutputLabel, _audioOutputCombo
             });
         }
 
@@ -611,6 +634,8 @@ namespace Broadcaster
                 Height = selectedHeight,
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
                 NoSignalDetectionEnabled = _noSignalEnabledCheck.Checked,
+                AutoReloadOnStart = _autoReloadCheck.Checked,
+                Bindings = _bindings.Clone(),
             };
         }
 

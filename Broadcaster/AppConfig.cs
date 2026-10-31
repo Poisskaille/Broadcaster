@@ -1,14 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Windows.Forms;
 
 namespace Broadcaster
 {
-    /// <summary>
-    /// Configuration persistée entre deux lancements : quel périphérique vidéo/audio utiliser,
-    /// et le volume choisi. Stockée en clé=valeur dans un fichier texte simple, pour éviter
-    /// toute dépendance supplémentaire (pas besoin de JSON pour 3 valeurs).
-    /// </summary>
     public class AppConfig
     {
         public string VideoSymbolicLink { get; set; } = "";
@@ -25,7 +21,8 @@ namespace Broadcaster
         public int Height { get; set; } = 1080;
 
         public string DisplayDeviceName { get; set; } = "";
-
+        public KeyBindings Bindings { get; set; } = new KeyBindings();
+        public bool AutoReloadOnStart { get; set; } = true;
         public bool HasVideoDevice => !string.IsNullOrEmpty(VideoSymbolicLink);
         public bool NoSignalDetectionEnabled { get; set; } = true;
 
@@ -64,12 +61,26 @@ namespace Broadcaster
                 if (values.TryGetValue("Height", out var h) && int.TryParse(h, out var _h)) config.Height = _h;
                 if (values.TryGetValue("DisplayDeviceName", out var dn)) config.DisplayDeviceName = dn;
                 if (values.TryGetValue("NoSignalDetectionEnabled", out var nsd) && bool.TryParse(nsd, out var _nsd)) config.NoSignalDetectionEnabled = _nsd;
+
+                config.Bindings.OpenMenu = ParseKey(values, "Key_OpenMenu", config.Bindings.OpenMenu);
+                config.Bindings.Reload = ParseKey(values, "Key_Reload", config.Bindings.Reload);
+                config.Bindings.ToggleCursor = ParseKey(values, "Key_ToggleCursor", config.Bindings.ToggleCursor);
+                if (!config.Bindings.IsValid()) config.Bindings = new KeyBindings(); // garde-fou anti-enfermement
+
+                if (values.TryGetValue("AutoReloadOnStart", out var arl) && bool.TryParse(arl, out var _arl)) config.AutoReloadOnStart = _arl;
             }
             catch
             {
-                // Config corrompue ou illisible : on repart sur une config par défaut.
+                
             }
             return config;
+        }
+
+        private static Keys ParseKey(Dictionary<string, string> values, string name, Keys fallback)
+        {
+            if (values.TryGetValue(name, out var raw) && Enum.TryParse<Keys>(raw, out var parsed) && parsed != Keys.None)
+                return parsed;
+            return fallback;
         }
 
         public void Save()
@@ -85,7 +96,11 @@ namespace Broadcaster
                     $"Width={Width}",
                     $"Height={Height}",
                     $"DisplayDeviceName={DisplayDeviceName}",
-                    $"NoSignalDetectionEnabled={NoSignalDetectionEnabled}"
+                    $"NoSignalDetectionEnabled={NoSignalDetectionEnabled}",
+                    $"Key_OpenMenu={Bindings.OpenMenu}",
+                    $"Key_Reload={Bindings.Reload}",
+                    $"Key_ToggleCursor={Bindings.ToggleCursor}",
+                    $"AutoReloadOnStart={AutoReloadOnStart}"
                 });
             }
             catch
