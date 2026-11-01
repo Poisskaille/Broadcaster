@@ -64,7 +64,7 @@ namespace Broadcaster
                 if (IsHandleCreated)
                 {
                     BeginInvoke((Action)(() =>
-                        MessageBox.Show(this, message, "Erreur de capture", MessageBoxButtons.OK, MessageBoxIcon.Error)));
+                        MessageBox.Show(this, message, Localization.T("Erreur de capture"), MessageBoxButtons.OK, MessageBoxIcon.Error)));
                 }
             };
 
@@ -132,6 +132,7 @@ namespace Broadcaster
         private void MainForm_Shown(object sender, EventArgs e)
         {
             _config = AppConfig.Load();
+            Localization.UseLanguage(_config.Language);
             EnterFullscreen();
             _clipRegionTimer.Start();
 
@@ -221,7 +222,7 @@ namespace Broadcaster
             catch (Exception ex)
             {
                 MessageBox.Show(this,
-                    "Impossible d'enregistrer la capture d'écran : " + ex.Message,
+                    Localization.F("Impossible d'enregistrer la capture d'écran : {0}", ex.Message),
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
@@ -250,8 +251,7 @@ namespace Broadcaster
             if (!_clipRecorder.IsRunning)
             {
                 _clipRecorder.WriteDiagnostic("F10 : le tampon des clips n'est pas démarré.");
-                MessageBox.Show(this, "Le tampon de clips n'est pas démarré. " +
-                    "Vérifie la capture vidéo et réessaie.",
+                MessageBox.Show(this, Localization.T("Le tampon de clips n'est pas démarré. Vérifie la capture vidéo et réessaie."),
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
@@ -267,8 +267,7 @@ namespace Broadcaster
                 _clipRecorder.WriteDiagnostic("Echec d'enregistrement : " + ex);
                 if (!IsDisposed && IsHandleCreated)
                 {
-                    MessageBox.Show(this, "Impossible d'enregistrer le clip : " + ex.Message +
-                        "\n\nJournal : " + _clipRecorder.DiagnosticPath,
+                    MessageBox.Show(this, Localization.F("Impossible d'enregistrer le clip : {0}\n\nJournal : {1}", ex.Message, _clipRecorder.DiagnosticPath),
                         "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
             }
@@ -378,6 +377,7 @@ namespace Broadcaster
                     if (form.ShowDialog(this) == DialogResult.OK)
                     {
                         _config = form.ResultConfig;
+                        Localization.UseLanguage(_config.Language);
                         _config.Save();
                         MoveFullscreenToConfiguredScreen();
 
@@ -415,7 +415,7 @@ namespace Broadcaster
 
                 if (videoDevice == null)
                 {
-                    MessageBox.Show(this, "Le périphérique vidéo configuré est introuvable. Ouvre les options pour en choisir un autre.",
+                    MessageBox.Show(this, Localization.T("Le périphérique vidéo configuré est introuvable. Ouvre les options pour en choisir un autre."),
                         "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
@@ -450,14 +450,14 @@ namespace Broadcaster
                     catch (Exception clipError)
                     {
                         _clipRecorder.WriteDiagnostic("Démarrage du tampon impossible : " + clipError);
-                        MessageBox.Show(this, "Impossible de démarrer les clips : " + clipError.Message,
+                        MessageBox.Show(this, Localization.F("Impossible de démarrer les clips : {0}", clipError.Message),
                             "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "Impossible de démarrer la capture : " + ex.Message,
+                MessageBox.Show(this, Localization.F("Impossible de démarrer la capture : {0}", ex.Message),
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
@@ -467,7 +467,7 @@ namespace Broadcaster
             if (_clipRecorder.IsSaving)
             {
                 MessageBox.Show(this,
-                    "Un clip est en cours d'écriture. Réessaie de fermer Broadcaster après le son de confirmation.",
+                    Localization.T("Un clip est en cours d'écriture. Réessaie de fermer Broadcaster après le son de confirmation."),
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 e.Cancel = true;
                 return;

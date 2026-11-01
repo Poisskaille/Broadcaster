@@ -38,7 +38,7 @@ namespace Broadcaster
         public static async Task PrepareAndLaunchAsync(UpdateInfo release, IProgress<int> progress)
         {
             if (release == null || !release.IsNewer || string.IsNullOrWhiteSpace(release.DownloadUrl))
-                throw new InvalidOperationException("Aucune mise à jour téléchargeable n'a été sélectionnée.");
+                throw new InvalidOperationException(Localization.T("Aucune mise à jour téléchargeable n'a été sélectionnée."));
 
             // Ne jamais accepter un lien arbitraire provenant d'une réponse API inattendue.
             Uri downloadUri;
@@ -47,14 +47,14 @@ namespace Broadcaster
                 !downloadUri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
                 !downloadUri.AbsolutePath.StartsWith("/Poisskaille/Broadcaster/releases/download/", StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException("L'adresse de téléchargement GitHub n'est pas reconnue.");
+                throw new InvalidOperationException(Localization.T("L'adresse de téléchargement GitHub n'est pas reconnue."));
             }
 
             string exePath = Application.ExecutablePath;
             string exeName = Path.GetFileName(exePath);
             string installDir = Path.GetDirectoryName(exePath);
             if (string.IsNullOrWhiteSpace(installDir) || string.IsNullOrWhiteSpace(exeName))
-                throw new InvalidOperationException("Impossible de retrouver le dossier de l'application.");
+                throw new InvalidOperationException(Localization.T("Impossible de retrouver le dossier de l'application."));
 
             string workDir = Path.Combine(Path.GetTempPath(), "Broadcaster-Update-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(workDir);
@@ -98,7 +98,7 @@ namespace Broadcaster
                 using (Process updater = Process.Start(psi))
                 {
                     if (updater == null)
-                        throw new InvalidOperationException("Le programme de mise à jour n'a pas pu démarrer.");
+                        throw new InvalidOperationException(Localization.T("Le programme de mise à jour n'a pas pu démarrer."));
                 }
                 launched = true;
             }
@@ -120,7 +120,7 @@ namespace Broadcaster
                 response.EnsureSuccessStatusCode();
                 long? expected = response.Content.Headers.ContentLength;
                 if (expected.HasValue && expected.Value > MaxZipBytes)
-                    throw new InvalidOperationException("La release ZIP dépasse la limite autorisée de 512 Mo.");
+                    throw new InvalidOperationException(Localization.T("La release ZIP dépasse la limite autorisée de 512 Mo."));
 
                 using (Stream input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                 using (var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None))
@@ -132,13 +132,13 @@ namespace Broadcaster
                     {
                         received += read;
                         if (received > MaxZipBytes)
-                            throw new InvalidOperationException("La release ZIP dépasse la limite autorisée de 512 Mo.");
+                            throw new InvalidOperationException(Localization.T("La release ZIP dépasse la limite autorisée de 512 Mo."));
                         await output.WriteAsync(buffer, 0, read).ConfigureAwait(false);
                         if (expected.GetValueOrDefault() > 0)
                             progress?.Report((int)Math.Min(100, received * 100 / expected.Value));
                     }
                     if (expected.HasValue && received != expected.Value)
-                        throw new InvalidDataException("Le téléchargement du ZIP est incomplet.");
+                        throw new InvalidDataException(Localization.T("Le téléchargement du ZIP est incomplet."));
                 }
             }
             progress?.Report(100);
@@ -148,14 +148,14 @@ namespace Broadcaster
         {
             if (!expectedDigest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ||
                 expectedDigest.Length != 71)
-                throw new InvalidDataException("L'empreinte fournie par GitHub est invalide.");
+                throw new InvalidDataException(Localization.T("L'empreinte fournie par GitHub est invalide."));
 
             using (var sha = SHA256.Create())
             using (var file = File.OpenRead(filename))
             {
                 var actual = BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "");
                 if (!actual.Equals(expectedDigest.Substring(7), StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("L'empreinte SHA-256 du ZIP ne correspond pas à celle de GitHub.");
+                    throw new InvalidDataException(Localization.T("L'empreinte SHA-256 du ZIP ne correspond pas à celle de GitHub."));
             }
         }
 
@@ -169,7 +169,7 @@ namespace Broadcaster
             using (var archive = new ZipArchive(File.OpenRead(zipFile), ZipArchiveMode.Read))
             {
                 if (archive.Entries.Count == 0 || archive.Entries.Count > MaxZipEntries)
-                    throw new InvalidDataException("Le ZIP contient un nombre anormal de fichiers.");
+                    throw new InvalidDataException(Localization.T("Le ZIP contient un nombre anormal de fichiers."));
 
                 foreach (ZipArchiveEntry entry in archive.Entries)
                 {
@@ -178,18 +178,18 @@ namespace Broadcaster
                     if (relative.StartsWith("/", StringComparison.Ordinal) ||
                         relative.IndexOf(':') >= 0 ||
                         Array.Exists(segments, s => s == ".." || s == "."))
-                        throw new InvalidDataException("Chemin interdit dans le ZIP : " + entry.FullName);
+                        throw new InvalidDataException(Localization.F("Chemin interdit dans le ZIP : {0}", entry.FullName));
 
                     // Rejette les liens symboliques Unix : ils pourraient sortir du dossier temporaire.
                     if (((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000)
-                        throw new InvalidDataException("Le ZIP contient un lien symbolique non autorisé.");
+                        throw new InvalidDataException(Localization.T("Le ZIP contient un lien symbolique non autorisé."));
 
                     string destPath = Path.GetFullPath(Path.Combine(destination,
                         relative.Replace('/', Path.DirectorySeparatorChar)));
                     if (!destPath.StartsWith(destRoot, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidDataException("Un chemin ZIP tente de sortir du dossier d'extraction.");
+                        throw new InvalidDataException(Localization.T("Un chemin ZIP tente de sortir du dossier d'extraction."));
                     if (!seen.Add(destPath))
-                        throw new InvalidDataException("Entrée ZIP en double : " + entry.FullName);
+                        throw new InvalidDataException(Localization.F("Entrée ZIP en double : {0}", entry.FullName));
 
                     if (string.IsNullOrEmpty(entry.Name))
                     {
@@ -199,7 +199,7 @@ namespace Broadcaster
 
                     totalBytes += entry.Length;
                     if (totalBytes > MaxExtractedBytes)
-                        throw new InvalidDataException("La taille décompressée dépasse 1 Go.");
+                        throw new InvalidDataException(Localization.T("La taille décompressée dépasse 1 Go."));
 
                     Directory.CreateDirectory(Path.GetDirectoryName(destPath));
                     using (Stream source = entry.Open())
@@ -212,17 +212,17 @@ namespace Broadcaster
             // On installe les fichiers à partir du répertoire contenant l'unique exécutable.
             string[] executables = Directory.GetFiles(destination, exeName, SearchOption.AllDirectories);
             if (executables.Length != 1)
-                throw new InvalidDataException("Le ZIP doit contenir exactement un fichier " + exeName + ".");
+                throw new InvalidDataException(Localization.F("Le ZIP doit contenir exactement un fichier {0}.", exeName));
 
             try
             {
                 Version packagedVersion = AssemblyName.GetAssemblyName(executables[0]).Version;
                 if (expectedVersion == null || !Normalize(packagedVersion).Equals(Normalize(expectedVersion)))
-                    throw new InvalidDataException("La version de l'exécutable dans le ZIP ne correspond pas à la release GitHub.");
+                    throw new InvalidDataException(Localization.T("La version de l'exécutable dans le ZIP ne correspond pas à la release GitHub."));
             }
             catch (BadImageFormatException ex)
             {
-                throw new InvalidDataException("La release ne contient pas un exécutable .NET Broadcaster valide.", ex);
+                throw new InvalidDataException(Localization.T("La release ne contient pas un exécutable .NET Broadcaster valide."), ex);
             }
             return Path.GetDirectoryName(executables[0]);
         }

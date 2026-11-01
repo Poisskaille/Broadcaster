@@ -17,6 +17,7 @@ namespace Broadcaster
         private readonly ComboBox _resolutionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
 
         private readonly ComboBox _screenCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        private readonly ComboBox _languageCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
 
         private readonly Button _checkUpdateButton = new Button { Text = "Rechercher une mise à jour", AutoSize = true };
         private readonly Button _installUpdateButton = new Button { Text = "Installer la mise à jour", AutoSize = true, Visible = false };
@@ -133,10 +134,12 @@ namespace Broadcaster
             ClientSize = new Size(700, 500);
 
             BuildLayout();
+            PopulateLanguageCombo();
             PopulateResolutionCombo();
             PopulateScreenCombo();
             PopulateDevices();
             PopulateColorTab();
+            Localization.TranslateControls(this);
             AcceptButton = _okButton;
             CancelButton = _cancelButton;
 
@@ -170,6 +173,17 @@ namespace Broadcaster
             Controls.Add(_cancelButton);
         }
 
+        private void PopulateLanguageCombo()
+        {
+            _languageCombo.Items.Clear();
+            foreach (string name in Localization.LanguageNames)
+                _languageCombo.Items.Add(Localization.T(name));
+
+            int index = Array.IndexOf(Localization.LanguageCodes,
+                Localization.NormalizeMode(_initialConfig.Language));
+            _languageCombo.SelectedIndex = index >= 0 ? index : 0;
+        }
+
         private void PopulateScreenCombo()
         {
             var all = Screen.AllScreens;
@@ -185,8 +199,8 @@ namespace Broadcaster
             for (int i = 0; i < _orderedScreens.Length; i++)
             {
                 var s = _orderedScreens[i];
-                string suffix = s.Primary ? " (Principal)" : "";
-                _screenCombo.Items.Add($"Écran {i + 1}{suffix} - {s.Bounds.Width}x{s.Bounds.Height}");
+                string suffix = s.Primary ? Localization.T(" (Principal)") : "";
+                _screenCombo.Items.Add($"{Localization.T("Écran")} {i + 1}{suffix} - {s.Bounds.Width}x{s.Bounds.Height}");
             }
 
             int match = Array.FindIndex(_orderedScreens, s => s.DeviceName == _initialConfig.DisplayDeviceName);
@@ -225,7 +239,7 @@ namespace Broadcaster
 
             _updateStatusLabel.Location = new Point(225, 80);
             _updateStatusLabel.MaximumSize = new Size(420, 65);
-            _updateStatusLabel.Text = $"Version actuelle : {UpdateChecker.CurrentVersion}";
+            _updateStatusLabel.Text = Localization.F("Version actuelle : {0}", UpdateChecker.CurrentVersion);
 
             _installUpdateButton.Location = new Point(15, 120);
             _installUpdateButton.Click += async (s, e) => await InstallAvailableUpdateAsync();
@@ -291,7 +305,7 @@ namespace Broadcaster
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, "Impossible d'ouvrir le dossier des clips : " + ex.Message,
+                MessageBox.Show(this, Localization.F("Impossible d'ouvrir le dossier des clips : {0}", ex.Message),
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
@@ -309,7 +323,7 @@ namespace Broadcaster
             catch (Exception ex)
             {
                 MessageBox.Show(this,
-                    "Impossible d'ouvrir le dossier des captures : " + ex.Message,
+                    Localization.F("Impossible d'ouvrir le dossier des captures : {0}", ex.Message),
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
@@ -328,7 +342,7 @@ namespace Broadcaster
             _availableUpdate = null;
             _installUpdateButton.Visible = false;
             _checkUpdateButton.Enabled = false;
-            _updateStatusLabel.Text = "Recherche en cours...";
+            _updateStatusLabel.Text = Localization.T("Recherche en cours...");
 
             try
             {
@@ -336,23 +350,23 @@ namespace Broadcaster
 
                 if (!info.IsNewer)
                 {
-                    _updateStatusLabel.Text = $"Application à jour (version {UpdateChecker.CurrentVersion}).";
+                    _updateStatusLabel.Text = Localization.F("Application à jour (version {0}).", UpdateChecker.CurrentVersion);
                 }
                 else if (string.IsNullOrWhiteSpace(info.DownloadUrl))
                 {
-                    _updateStatusLabel.Text = $"Version {info.LatestVersion} disponible, mais aucune archive ZIP n'est jointe à la release.";
+                    _updateStatusLabel.Text = Localization.F("Version {0} disponible, mais aucune archive ZIP n'est jointe à la release.", info.LatestVersion);
                 }
                 else
                 {
                     _availableUpdate = info;
-                    _updateStatusLabel.Text = $"Nouvelle version {info.LatestVersion} disponible ! (actuelle : {UpdateChecker.CurrentVersion})";
-                    _installUpdateButton.Text = $"Mettre à jour vers {info.LatestVersion}";
+                    _updateStatusLabel.Text = Localization.F("Nouvelle version {0} disponible ! (actuelle : {1})", info.LatestVersion, UpdateChecker.CurrentVersion);
+                    _installUpdateButton.Text = Localization.F("Mettre à jour vers {0}", info.LatestVersion);
                     _installUpdateButton.Visible = true;
                 }
             }
             catch (Exception ex)
             {
-                _updateStatusLabel.Text = "Impossible de vérifier : " + ex.Message;
+                _updateStatusLabel.Text = Localization.F("Impossible de vérifier : {0}", ex.Message);
             }
             finally
             {
@@ -368,11 +382,8 @@ namespace Broadcaster
                 return;
 
             if (MessageBox.Show(this,
-                $"Installer Broadcaster {info.LatestVersion} depuis GitHub ?\n\n" +
-                $"Fichier : {info.AssetName}\n\n" +
-                "L'application se fermera, ses fichiers seront remplacés, puis elle redémarrera. " +
-                "Les paramètres utilisateur seront conservés.",
-                "Mise à jour de Broadcaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                Localization.F("Installer Broadcaster {0} depuis GitHub ?\n\nFichier : {1}\n\nL'application se fermera, ses fichiers seront remplacés, puis elle redémarrera. Les paramètres utilisateur seront conservés.", info.LatestVersion, info.AssetName),
+                Localization.T("Mise à jour de Broadcaster"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
                 return;
 
             _isInstallingUpdate = true;
@@ -380,26 +391,26 @@ namespace Broadcaster
             _installUpdateButton.Enabled = false;
             _okButton.Enabled = false;
             _cancelButton.Enabled = false;
-            _updateStatusLabel.Text = "Téléchargement de la mise à jour...";
+            _updateStatusLabel.Text = Localization.T("Téléchargement de la mise à jour...");
 
             try
             {
                 var progress = new Progress<int>(percent =>
                 {
                     if (!IsDisposed)
-                        _updateStatusLabel.Text = $"Téléchargement : {percent}%";
+                        _updateStatusLabel.Text = Localization.F("Téléchargement : {0}%", percent);
                 });
 
                 await UpdateInstaller.PrepareAndLaunchAsync(info, progress);
-                _updateStatusLabel.Text = "Téléchargement terminé. Fermeture pour installation...";
+                _updateStatusLabel.Text = Localization.T("Téléchargement terminé. Fermeture pour installation...");
                 _isInstallingUpdate = false;
                 // Le script attendra la fermeture effective (libération de Broadcaster.exe).
                 Application.Exit();
             }
             catch (Exception ex)
             {
-                _updateStatusLabel.Text = "Mise à jour impossible : " + ex.Message;
-                MessageBox.Show(this, "La mise à jour n'a pas été installée :\n" + ex.Message,
+                _updateStatusLabel.Text = Localization.F("Mise à jour impossible : {0}", ex.Message);
+                MessageBox.Show(this, Localization.F("La mise à jour n'a pas été installée :\n{0}", ex.Message),
                     "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -428,7 +439,7 @@ namespace Broadcaster
             using (var dialog = new OpenFileDialog
             {
                 Filter = "Images (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp",
-                Title = "Choisir une image de fond"
+                Title = Localization.T("Choisir une image de fond")
             })
             {
                 if (dialog.ShowDialog(this) == DialogResult.OK)
@@ -440,7 +451,7 @@ namespace Broadcaster
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show(this, "Impossible de charger cette image : " + ex.Message,
+                        MessageBox.Show(this, Localization.F("Impossible de charger cette image : {0}", ex.Message),
                             "SwitchViewer", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
@@ -481,8 +492,12 @@ namespace Broadcaster
             _audioOutputCombo.Location = new Point(15, 343);
             _audioOutputCombo.Width = 405;
 
+            var languageLabel = new Label { Text = "Langue de l'application :", AutoSize = true, Location = new Point(15, 385) };
+            _languageCombo.Location = new Point(15, 408);
+
             page.Controls.AddRange(new Control[]
             {
+        languageLabel, _languageCombo,
         screenLabel, _screenCombo,
         resolutionLabel, _resolutionCombo,
         volumeTitle, _volumeTrack, _volumeLabel,
@@ -532,7 +547,7 @@ namespace Broadcaster
             {
                 // Valeur qui ne correspond à aucun preset (config éditée à la main, par ex.) :
                 // on l'affiche telle quelle plutôt que de la remplacer silencieusement.
-                _resolutionCombo.Items.Add($"{_initialConfig.Width} x {_initialConfig.Height} (personnalisé)");
+                _resolutionCombo.Items.Add($"{_initialConfig.Width} x {_initialConfig.Height}{Localization.T(" (personnalisé)")}");
                 matchIndex = _resolutionCombo.Items.Count - 1;
             }
 
@@ -585,7 +600,7 @@ namespace Broadcaster
 
             _profileCombo.Items.Clear();
             foreach (var p in _profileSet.Profiles)
-                _profileCombo.Items.Add(p.Name);
+                _profileCombo.Items.Add(p.IsDefault ? Localization.T("Par défaut") : p.Name);
 
             if (_profileCombo.Items.Count == 0) return;
 
@@ -645,7 +660,7 @@ namespace Broadcaster
             var profile = _profileSet.Profiles[_profileCombo.SelectedIndex];
             if (profile.IsDefault) return;
 
-            var confirm = MessageBox.Show(this, $"Supprimer le profil \"{profile.Name}\" ?",
+            var confirm = MessageBox.Show(this, Localization.F("Supprimer le profil \"{0}\" ?", profile.Name),
                 "Broadcaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes) return;
 
@@ -677,12 +692,12 @@ namespace Broadcaster
         {
             if (_profileSet == null || _profileSet.Profiles.Count == 0) return;
 
-            string name = PromptForText("Nouveau profil", "Nom du profil :", "Nouveau profil");
+            string name = PromptForText(Localization.T("Nouveau profil"), Localization.T("Nom du profil :"), Localization.T("Nouveau profil"));
             if (string.IsNullOrWhiteSpace(name)) return;
 
             if (_profileSet.Profiles.Any(p => p.Name == name))
             {
-                MessageBox.Show(this, "Un profil porte déjà ce nom.", "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, Localization.T("Un profil porte déjà ce nom."), "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -701,12 +716,12 @@ namespace Broadcaster
             var profile = _profileSet.Profiles[_profileCombo.SelectedIndex];
             if (profile.IsDefault) return;
 
-            string newName = PromptForText("Renommer le profil", "Nouveau nom :", profile.Name);
+            string newName = PromptForText(Localization.T("Renommer le profil"), Localization.T("Nouveau nom :"), profile.Name);
             if (string.IsNullOrWhiteSpace(newName) || newName == profile.Name) return;
 
             if (_profileSet.Profiles.Any(p => p.Name == newName))
             {
-                MessageBox.Show(this, "Un profil porte déjà ce nom.", "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, Localization.T("Un profil porte déjà ce nom."), "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -734,7 +749,7 @@ namespace Broadcaster
                 var label1 = new Label { Text = label, AutoSize = true, Location = new Point(10, 10) };
                 var textBox = new TextBox { Text = initialValue, Location = new Point(10, 35), Width = 290 };
                 var ok = new Button { Text = "OK", DialogResult = DialogResult.OK, Location = new Point(140, 70) };
-                var cancel = new Button { Text = "Annuler", DialogResult = DialogResult.Cancel, Location = new Point(220, 70) };
+                var cancel = new Button { Text = Localization.T("Annuler"), DialogResult = DialogResult.Cancel, Location = new Point(220, 70) };
 
                 dialog.Controls.AddRange(new Control[] { label1, textBox, ok, cancel });
                 dialog.AcceptButton = ok;
@@ -765,12 +780,12 @@ namespace Broadcaster
                 _videoCombo.Items.Add(device);
 
             _audioCaptureCombo.Items.Clear();
-            _audioCaptureCombo.Items.Add("(Aucune - le device vidéo fournit déjà l'audio)");
+            _audioCaptureCombo.Items.Add(Localization.T("(Aucune - le device vidéo fournit déjà l'audio)"));
             foreach (var device in MediaEngine.EnumerateAudioCaptureDevices())
                 _audioCaptureCombo.Items.Add(device);
 
             _audioOutputCombo.Items.Clear();
-            _audioOutputCombo.Items.Add("(Périphérique par défaut du système)");
+            _audioOutputCombo.Items.Add(Localization.T("(Périphérique par défaut du système)"));
             foreach (var device in MediaEngine.EnumerateAudioOutputDevices())
                 _audioOutputCombo.Items.Add(device);
 
@@ -790,7 +805,7 @@ namespace Broadcaster
         {
             if (!(_videoCombo.SelectedItem is VideoDeviceInfo selectedVideo))
             {
-                MessageBox.Show(this, "Aucune source vidéo sélectionnée.", "Broadcaster",
+                MessageBox.Show(this, Localization.T("Aucune source vidéo sélectionnée."), "Broadcaster",
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 DialogResult = DialogResult.None;
                 return;
@@ -843,6 +858,7 @@ namespace Broadcaster
                 ClipsEnabled = _enableClipsCheck.Checked,
                 ClipDurationSeconds = (int)_clipDurationInput.Value,
                 ClipTargetFps = ClipFpsPresets[Math.Max(0, _clipFpsCombo.SelectedIndex)],
+                Language = Localization.LanguageCodes[Math.Max(0, _languageCombo.SelectedIndex)],
                 Bindings = _bindings.Clone(),
             };
         }

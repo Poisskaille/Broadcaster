@@ -81,7 +81,7 @@ namespace Broadcaster
         {
             _working = current.Clone();
 
-            Text = "Raccourcis clavier";
+            Text = Localization.T("Raccourcis clavier");
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
@@ -111,12 +111,13 @@ namespace Broadcaster
             saveButton.Click += (s, e) => Result = _working.Clone();
 
             Controls.AddRange(new Control[] { _statusLabel, note, resetButton, saveButton, cancelButton });
+            Localization.TranslateControls(this);
             RefreshLabels();
         }
 
         private void AddRow(BindingAction action, ref int y)
         {
-            var title = new Label { Text = Titles[action] + " :", AutoSize = true, Location = new Point(15, y + 5) };
+            var title = new Label { Text = Localization.T(Titles[action]) + " :", AutoSize = true, Location = new Point(15, y + 5) };
             var keyLabel = new Label
             {
                 BorderStyle = BorderStyle.FixedSingle,
@@ -157,7 +158,7 @@ namespace Broadcaster
         {
             if (key == KeyBindings.ReservedKey)
             {
-                _statusLabel.Text = "F11 est réservée au plein écran.";
+                _statusLabel.Text = Localization.T("F11 est réservée au plein écran.");
                 return;
             }
 
@@ -165,7 +166,7 @@ namespace Broadcaster
             {
                 if (other != action && GetKey(other) == key)
                 {
-                    _statusLabel.Text = $"{FormatKey(key)} est déjà utilisée pour « {Titles[other]} ».";
+                    _statusLabel.Text = Localization.F("{0} est déjà utilisée pour « {1} ».", FormatKey(key), Localization.T(Titles[other]));
                     return;
                 }
             }
@@ -220,9 +221,9 @@ namespace Broadcaster
             foreach (BindingAction action in Enum.GetValues(typeof(BindingAction)))
             {
                 bool isCapturing = _capturing == action;
-                _keyLabels[action].Text = isCapturing ? "Appuie sur une touche" : FormatKey(GetKey(action));
+                _keyLabels[action].Text = isCapturing ? Localization.T("Appuie sur une touche") : FormatKey(GetKey(action));
                 _keyLabels[action].BackColor = isCapturing ? Color.LightYellow : SystemColors.Control;
-                _changeButtons[action].Text = isCapturing ? "Annuler" : "Modifier";
+                _changeButtons[action].Text = isCapturing ? Localization.T("Annuler") : Localization.T("Modifier");
             }
         }
 
@@ -230,10 +231,10 @@ namespace Broadcaster
         {
             switch (key)
             {
-                case Keys.Escape: return "Échap";
-                case Keys.Return: return "Entrée";
-                case Keys.Space: return "Espace";
-                case Keys.Back: return "Retour arrière";
+                case Keys.Escape: return Localization.T("Échap");
+                case Keys.Return: return Localization.T("Entrée");
+                case Keys.Space: return Localization.T("Espace");
+                case Keys.Back: return Localization.T("Retour arrière");
                 default:
                     string s = key.ToString();
                     if (s.Length == 2 && s[0] == 'D' && char.IsDigit(s[1])) return s.Substring(1); // D1 -> 1

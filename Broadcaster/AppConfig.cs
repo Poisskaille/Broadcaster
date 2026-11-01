@@ -28,6 +28,8 @@ namespace Broadcaster
         public bool ClipsEnabled { get; set; } = false;
         public int ClipDurationSeconds { get; set; } = 30;
         public int ClipTargetFps { get; set; } = 30;
+        // auto = langue Windows (anglais si non prise en charge); sinon code de langue explicite.
+        public string Language { get; set; } = "auto";
 
         private static string ConfigPath
         {
@@ -86,6 +88,9 @@ namespace Broadcaster
                     config.Bindings.Clip == config.Bindings.Screenshot)
                     config.Bindings.Clip = KeyBindings.ChooseClipKey(config.Bindings);
 
+                if (values.TryGetValue("Language", out var lang))
+                    config.Language = Localization.NormalizeMode(lang);
+
                 if (values.TryGetValue("ClipsEnabled", out var ce) && bool.TryParse(ce, out var enabled))
                     config.ClipsEnabled = enabled;
                 if (values.TryGetValue("ClipDurationSeconds", out var cds) && int.TryParse(cds, out var secs))
@@ -133,6 +138,7 @@ namespace Broadcaster
                     $"ClipsEnabled={ClipsEnabled}",
                     $"ClipDurationSeconds={ClipDurationSeconds}",
                     $"ClipTargetFps={ClipTargetFps}",
+                    $"Language={Localization.NormalizeMode(Language)}",
                     $"AutoReloadOnStart={AutoReloadOnStart}"
                 });
             }

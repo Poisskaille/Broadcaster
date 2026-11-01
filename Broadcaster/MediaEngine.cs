@@ -116,7 +116,7 @@ namespace Broadcaster
             if (videoDevice == null)
                 throw new ArgumentNullException(nameof(videoDevice));
             if (videoDevice.Activate == null)
-                throw new InvalidOperationException("Le device vidéo n'a pas d'activateur valide. Ouvre les options et resélectionne-le dans la liste.");
+                throw new InvalidOperationException(Localization.T("Le device vidéo n'a pas d'activateur valide. Ouvre les options et resélectionne-le dans la liste."));
 
             _audioEndpointId = audioOutputDevice?.EndpointId;
 
@@ -363,7 +363,7 @@ namespace Broadcaster
                         int status = (int)evt.Status;
                         if (status < 0)
                         {
-                            OnError?.Invoke($"Erreur Media Foundation ({label}, code 0x{status:X8}) sur l'évènement {evt.TypeInfo}.");
+                            OnError?.Invoke(Localization.F("Erreur Media Foundation ({0}, code 0x{1:X8}) sur l'évènement {2}.", label, status, evt.TypeInfo));
                         }
                     }
                 }

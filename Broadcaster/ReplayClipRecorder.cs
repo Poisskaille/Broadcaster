@@ -118,7 +118,7 @@ namespace Broadcaster
             if (outputWidth < 160 || outputWidth > 3840 ||
                 outputHeight < 120 || outputHeight > 2160)
                 throw new ArgumentOutOfRangeException(nameof(outputWidth),
-                    "Résolution de clip non prise en charge (maximum 3840 x 2160).");
+                    Localization.T("Résolution de clip non prise en charge (maximum 3840 x 2160)."));
             if (targetFps < 10 || targetFps > 60)
                 throw new ArgumentOutOfRangeException(nameof(targetFps),
                     "Le FPS cible doit être compris entre 10 et 60.");
@@ -489,7 +489,7 @@ namespace Broadcaster
                         int h = Math.Max(1, (int)Math.Round(bounds.Height * scale));
                         IntPtr srcDC = GetDC(IntPtr.Zero);
                         if (srcDC == IntPtr.Zero)
-                            throw new InvalidOperationException("Impossible d'obtenir le bureau Windows.");
+                            throw new InvalidOperationException(Localization.T("Impossible d'obtenir le bureau Windows."));
                         try
                         {
                             IntPtr destDC = canvas.GetHdc();
@@ -499,13 +499,13 @@ namespace Broadcaster
                                 // sans revenir à un DrawImage bicubique sur chaque frame.
                                 if (SetStretchBltMode(destDC, Halftone) == 0)
                                     throw new System.ComponentModel.Win32Exception(
-                                        Marshal.GetLastWin32Error(), "Impossible d'activer le redimensionnement de qualité.");
+                                        Marshal.GetLastWin32Error(), Localization.T("Impossible d'activer le redimensionnement de qualité."));
                                 SetBrushOrgEx(destDC, 0, 0, IntPtr.Zero);
                                 if (!StretchBlt(destDC, (outputWidth - w) / 2,
                                     (outputHeight - h) / 2, w, h, srcDC,
                                     bounds.X, bounds.Y, bounds.Width, bounds.Height, SrcCopy))
                                     throw new System.ComponentModel.Win32Exception(
-                                        Marshal.GetLastWin32Error(), "Échec de la copie vidéo redimensionnée.");
+                                        Marshal.GetLastWin32Error(), Localization.T("Échec de la copie vidéo redimensionnée."));
                             }
                             finally { canvas.ReleaseHdc(destDC); }
                         }
@@ -551,7 +551,7 @@ namespace Broadcaster
         public async Task<string> SaveReplayAsync()
         {
             if (Interlocked.Exchange(ref _saving, 1) != 0)
-                throw new InvalidOperationException("Un clip est déjà en cours d'enregistrement.");
+                throw new InvalidOperationException(Localization.T("Un clip est déjà en cours d'enregistrement."));
             try
             {
                 List<ReplayVideoFrame> frames;
@@ -563,7 +563,7 @@ namespace Broadcaster
                 long captureCount, encodedCount, droppedCount;
                 lock (_sync)
                 {
-                    if (!_running) throw new InvalidOperationException("Active les clips dans Options > Extras.");
+                    if (!_running) throw new InvalidOperationException(Localization.T("Active les clips dans Options > Extras."));
                     DateTime minTime = now.AddSeconds(-_durationSeconds);
                     frames = _frames.Where(f => f.Time >= minTime).ToList();
                     captureCount = _capturedFrames;
@@ -580,14 +580,13 @@ namespace Broadcaster
                     lock (_sync)
                     {
                         reason = _captureBounds.Width < 4 || _captureBounds.Height < 4
-                            ? "La zone de capture vidéo n'est pas disponible."
+                            ? Localization.T("La zone de capture vidéo n'est pas disponible.")
                             : _lastCaptureError != null
-                                ? "La capture échoue : " + _lastCaptureError
-                                : "Le tampon n'a pas encore assez d'images.";
+                                ? Localization.F("La capture échoue : {0}", _lastCaptureError)
+                                : Localization.T("Le tampon n'a pas encore assez d'images.");
                     }
                     throw new InvalidOperationException(reason +
-                        " Vérifie que la vidéo est visible et attends quelques secondes. " +
-                        "Images récentes : " + frames.Count + ".");
+                        Localization.F(" Vérifie que la vidéo est visible et attends quelques secondes. Images récentes : {0}.", frames.Count));
                 }
 
                 // Vérifier aussi la résolution JPEG REELLE ; le header AVI seul
@@ -598,9 +597,8 @@ namespace Broadcaster
                 {
                     if (firstFrame.Width != width || firstFrame.Height != height)
                         throw new InvalidOperationException(
-                            "Résolution du tampon incorrecte : les images sont en " +
-                            firstFrame.Width + "x" + firstFrame.Height +
-                            " alors que les paramètres demandent " + width + "x" + height + ".");
+                            Localization.F("Résolution du tampon incorrecte : les images sont en {0}x{1} alors que les paramètres demandent {2}x{3}.",
+                                firstFrame.Width, firstFrame.Height, width, height));
                 }
 
                 string folder = GetClipsFolder();
@@ -616,7 +614,7 @@ namespace Broadcaster
                             width, height, targetFps, MaximumAviSize);
                         // Le fichier doit contenir l'en-tête AVI et les données.
                         if (!File.Exists(path) || new FileInfo(path).Length < 1024)
-                            throw new IOException("Le fichier AVI produit est vide ou incomplet.");
+                            throw new IOException(Localization.T("Le fichier AVI produit est vide ou incomplet."));
                         double seconds = frames.Count >= 2
                             ? (frames[frames.Count - 1].Time - frames[0].Time).TotalSeconds
                             : 0;
