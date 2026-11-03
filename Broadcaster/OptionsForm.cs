@@ -15,6 +15,9 @@ namespace Broadcaster
         private readonly TrackBar _volumeTrack = new TrackBar { Minimum = 0, Maximum = 100, TickFrequency = 10 };
         private readonly Label _volumeLabel = new Label { AutoSize = true };
         private readonly ComboBox _resolutionCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
+        private readonly ComboBox _captureFpsCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 225 };
+        private static readonly int[] CaptureFpsPresets = { 0, 24, 25, 30, 50, 60, 90, 100, 120, 144, 165, 240 };
+        private readonly CheckBox _previewVsyncCheck = new CheckBox { Text = "V-Sync (DX11)", AutoSize = true };
 
         private readonly ComboBox _screenCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
         private readonly ComboBox _languageCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 300 };
@@ -35,6 +38,16 @@ namespace Broadcaster
         ("3840 x 2160 (4K UHD)", 3840, 2160),
 };
 
+        private readonly CheckBox _debugOverlayCheck = new CheckBox
+        {
+            Text = "Afficher la banderole de performances (CPU, GPU, FPS, débit)", AutoSize = true
+        };
+        private readonly Label _debugOverlayHint = new Label
+        {
+            Text = "Banderole discrète en haut de la fenêtre vidéo, sans effet sur le flux HDMI.\n" +
+                   "Les métriques indisponibles sont signalées.",
+            ForeColor = Color.DimGray, AutoSize = true
+        };
         private readonly CheckBox _autoReloadCheck = new CheckBox
         {
             Text = "Relancer automatiquement la capture 3 s après le démarrage (corrige le décalage du son)",
@@ -100,6 +113,63 @@ namespace Broadcaster
         private readonly ColorRow _hueRow = new ColorRow { Property = VideoProcAmpProperty.Hue };
         private readonly ColorRow _saturationRow = new ColorRow { Property = VideoProcAmpProperty.Saturation };
 
+        // --- Traitement GPU / qualité de la source, stockés par profil personnalisé ---
+        private readonly CheckBox _sharpenEnabled = new CheckBox { Text = "Activer la netteté (DirectX 11 / masque flou)", AutoSize = true };
+        private readonly TrackBar _sharpenAmount = new TrackBar { Minimum = -100, Maximum = 100, TickFrequency = 20, Width = 375 };
+        private readonly Label _sharpenValue = new Label { AutoSize = true };
+        private readonly ComboBox _antiAliasingCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, Width = 210
+        };
+        private readonly ComboBox _chromaCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, Width = 205
+        };
+        private readonly CheckBox _debandEnabled = new CheckBox
+        {
+            Text = "Activer le debanding (dégradés plus lisses)", AutoSize = true
+        };
+        private readonly TrackBar _debandStrength = new TrackBar
+        {
+            Minimum = 0, Maximum = 100, TickFrequency = 10, Width = 365
+        };
+        private readonly Label _debandValue = new Label { AutoSize = true };
+        private sealed class SourceChoice
+        {
+            public string Value { get; }
+            public string Label { get; }
+            public SourceChoice(string value, string label) { Value = value; Label = label; }
+            public override string ToString() => Label;
+        }
+        private static void AddChoices(ComboBox combo, params string[] values)
+        {
+            combo.Items.Clear();
+            foreach (string value in values)
+                combo.Items.Add(new SourceChoice(value, Localization.T(value)));
+        }
+        private static string SelectedChoice(ComboBox combo) =>
+            (combo.SelectedItem as SourceChoice)?.Value ?? "Auto";
+        private static void SelectChoice(ComboBox combo, string saved)
+        {
+            for (int i = 0; i < combo.Items.Count; i++)
+            {
+                if ((combo.Items[i] as SourceChoice)?.Value == saved)
+                {
+                    combo.SelectedIndex = i;
+                    return;
+                }
+            }
+            combo.SelectedIndex = 0;
+        }
+        private readonly ComboBox _sourceFormatCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170 };
+        private readonly ComboBox _yuvMatrixCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170 };
+        private readonly ComboBox _yuvRangeCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170 };
+        private readonly Button _showCaptureModes = new Button { Text = "Modes de la carte...", Width = 165 };
+        private readonly Label _sourceFormatStatus = new Label { AutoSize = true, ForeColor = Color.DimGray, MaximumSize = new Size(615, 0) };
+        private readonly System.Windows.Forms.Timer _videoFpsTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        private bool _updatingVideoUi;
+        private int _previousProfileIndex = -1;
+
         private readonly Button _okButton = new Button { Text = "Appliquer", DialogResult = DialogResult.OK };
         private readonly Button _cancelButton = new Button { Text = "Annuler", DialogResult = DialogResult.Cancel };
         private readonly PictureBox _backgroundPreview = new PictureBox
@@ -117,6 +187,15 @@ namespace Broadcaster
         private readonly CaptureSession _captureSession;
         private bool _colorTabAvailable;
         private DeviceColorProfileSet _profileSet;
+        // Les profils doivent rester accessibles quand la capture ne démarre pas.
+        // La sélection de la carte dans Général est la référence ; ne pas dépendre
+        // uniquement de CaptureSession.ActiveVideoSymbolicLink (null après Stop()).
+        private string ProfileDeviceLink =>
+            (_videoCombo.SelectedItem as VideoDeviceInfo)?.SymbolicLink ??
+            _captureSession?.ActiveVideoSymbolicLink ?? _initialConfig.VideoSymbolicLink;
+        private string ProfileDeviceName =>
+            (_videoCombo.SelectedItem as VideoDeviceInfo)?.FriendlyName ??
+            _captureSession?.ActiveVideoFriendlyName ?? "Broadcaster";
 
 
 
@@ -131,31 +210,74 @@ namespace Broadcaster
             StartPosition = FormStartPosition.CenterParent;
             MaximizeBox = false;
             MinimizeBox = false;
-            ClientSize = new Size(700, 500);
+            ClientSize = new Size(700, 710);
 
             BuildLayout();
             PopulateLanguageCombo();
             PopulateResolutionCombo();
+            PopulateCaptureFpsCombo();
+            _previewVsyncCheck.Checked = _initialConfig.PreviewVsync;
             PopulateScreenCombo();
             PopulateDevices();
             PopulateColorTab();
+            RefreshVideoEditors();
             Localization.TranslateControls(this);
             AcceptButton = _okButton;
             CancelButton = _cancelButton;
 
             _okButton.Click += OkButton_Click;
             FormClosing += OptionsForm_FormClosing;
-            _profileCombo.SelectedIndexChanged += (s, e) => ApplySelectedProfileToUI();
+            _videoCombo.SelectedIndexChanged += (s, e) =>
+            {
+                SavePreviousProfileVideoSettings();
+                _previousProfileIndex = -1;
+                PopulateColorTab();
+                RefreshVideoEditors();
+            };
+            _profileCombo.SelectedIndexChanged += (s, e) =>
+            {
+                SavePreviousProfileVideoSettings();
+                ApplySelectedProfileToUI();
+            };
             _newProfileButton.Click += (s, e) => CreateNewProfile();
             _renameProfileButton.Click += (s, e) => RenameSelectedProfile();
             _deleteProfileButton.Click += (s, e) => DeleteSelectedProfile();
+            _videoFpsTimer.Tick += (s, e) => UpdateActiveVideoStatus();
+            _showCaptureModes.Click += (s, e) => ShowCaptureModes();
+            _videoFpsTimer.Start();
+            FormClosed += (s, e) => { _videoFpsTimer.Stop(); _videoFpsTimer.Dispose(); };
+        }
+
+        private void ShowCaptureModes()
+        {
+            var modes = _captureSession?.AvailableVideoModes;
+            if (modes == null || modes.Count == 0)
+            {
+                MessageBox.Show(this, Localization.T("Lance une capture avant de consulter les modes annoncés par la carte."),
+                    Localization.T("Modes vidéo"), MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            using (var dialog = new CaptureModesDialog(modes.ToList(), _captureSession.ActiveVideoMode))
+                dialog.ShowDialog(this);
+        }
+
+        private void UpdateActiveVideoStatus()
+        {
+            string current = _captureSession?.ActiveSourceFormat;
+            double measured = _captureSession?.MeasuredGpuFps ?? 0;
+            _sourceFormatStatus.Text = Localization.T("Format actif : ") +
+                (string.IsNullOrEmpty(current) ? "—" : current) +
+                (measured > 0 ? Localization.T("\nRendu DirectX 11 : ") + measured.ToString("0.0") +
+                    Localization.T(" FPS mesurés") : Localization.T("\nRendu EVR / FPS non mesurés")) +
+                (string.IsNullOrEmpty(_captureSession?.ActiveVideoWarning) ? "" :
+                    "\n" + _captureSession.ActiveVideoWarning);
         }
 
         private void BuildLayout()
         {
-            var tabs = new TabControl { Location = new Point(10, 10), Size = new Size(680, 460) };
+            var tabs = new TabControl { Location = new Point(10, 10), Size = new Size(680, 655) };
             var generalTab = new TabPage("Général");
-            var videoTab = new TabPage("Vidéo");
+            var videoTab = new TabPage("Vidéo") { AutoScroll = true };
             tabs.TabPages.Add(generalTab);
             tabs.TabPages.Add(videoTab);
             var extrasTab = new TabPage("Extras");
@@ -165,8 +287,8 @@ namespace Broadcaster
             BuildGeneralTab(generalTab);
             BuildVideoTab(videoTab);
 
-            _okButton.Location = new Point(510, 470);
-            _cancelButton.Location = new Point(600, 470);
+            _okButton.Location = new Point(510, 675);
+            _cancelButton.Location = new Point(600, 675);
 
             Controls.Add(tabs);
             Controls.Add(_okButton);
@@ -211,7 +333,7 @@ namespace Broadcaster
         {
             var label = new Label
             {
-                Text = "Image affichée quand aucun signal n'est reçu depuis 10 secondes :",
+                Text = Localization.T("Image affichée quand aucun signal n’est reçu depuis 10 secondes :"),
                 AutoSize = true,
                 Location = new Point(15, 15)
             };
@@ -261,9 +383,13 @@ namespace Broadcaster
             _clipInfoLabel.Location = new Point(35, 314);
             _openClipsButton.Location = new Point(15, 380);
             _openClipsButton.Click += (s, e) => OpenClipsFolder();
+            _debugOverlayCheck.Location = new Point(15, 427);
+            _debugOverlayCheck.Checked = _initialConfig.ShowDebugOverlay;
+            _debugOverlayHint.Location = new Point(35, 455);
             page.Controls.AddRange(new Control[] {
                 _enableClipsCheck, _clipDurationLabel, _clipDurationInput,
-                _clipFpsLabel, _clipFpsCombo, _clipInfoLabel, _openClipsButton
+                _clipFpsLabel, _clipFpsCombo, _clipInfoLabel, _openClipsButton,
+                _debugOverlayCheck, _debugOverlayHint
             });
             RefreshClipControls();
 
@@ -474,21 +600,27 @@ namespace Broadcaster
             _resolutionCombo.Location = new Point(15, 98);
             _resolutionCombo.Width = 250;
 
+            var captureFpsLabel = new Label { Text = "FPS de capture (carte HDMI) :", AutoSize = true, Location = new Point(302, 75) };
+            _captureFpsCombo.Location = new Point(302, 98);
+            _previewVsyncCheck.Location = new Point(540, 100);
+            var vsyncHint = new ToolTip();
+            vsyncHint.SetToolTip(_previewVsyncCheck,
+                Localization.T("Supprime le tearing mais peut limiter les FPS de l’aperçu à la fréquence de l’écran."));
             var volumeTitle = new Label { Text = "Volume :", AutoSize = true, Location = new Point(15, 135) };
             _volumeTrack.Location = new Point(15, 158);
             _volumeTrack.Width = 320;
             _volumeTrack.ValueChanged += (s, e) => _volumeLabel.Text = $"{_volumeTrack.Value}%";
             _volumeLabel.Location = new Point(345, 165);
 
-            var videoLabel = new Label { Text = "Capture Source :", AutoSize = true, Location = new Point(15, 200) };
+            var videoLabel = new Label { Text = "Source de capture vidéo :", AutoSize = true, Location = new Point(15, 200) };
             _videoCombo.Location = new Point(15, 223);
             _videoCombo.Width = 405;
 
-            var audioCaptureLabel = new Label { Text = "Audio Capture (if need to separate audio and video)", AutoSize = true, Location = new Point(15, 260) };
+            var audioCaptureLabel = new Label { Text = "Capture audio (si distincte de la vidéo)", AutoSize = true, Location = new Point(15, 260) };
             _audioCaptureCombo.Location = new Point(15, 283);
             _audioCaptureCombo.Width = 405;
 
-            var audioOutputLabel = new Label { Text = "Audio Output :", AutoSize = true, Location = new Point(15, 320) };
+            var audioOutputLabel = new Label { Text = "Sortie audio :", AutoSize = true, Location = new Point(15, 320) };
             _audioOutputCombo.Location = new Point(15, 343);
             _audioOutputCombo.Width = 405;
 
@@ -499,7 +631,7 @@ namespace Broadcaster
             {
         languageLabel, _languageCombo,
         screenLabel, _screenCombo,
-        resolutionLabel, _resolutionCombo,
+        resolutionLabel, _resolutionCombo, captureFpsLabel, _captureFpsCombo, _previewVsyncCheck,
         volumeTitle, _volumeTrack, _volumeLabel,
         videoLabel, _videoCombo,
         audioCaptureLabel, _audioCaptureCombo,
@@ -526,12 +658,93 @@ namespace Broadcaster
             BuildColorRow(page, _hueRow, "Teinte :", ref y);
             BuildColorRow(page, _saturationRow, "Saturation :", ref y);
 
+            // Les quatre curseurs de couleur finissent à y=240. Réglages vidéo juste dessous.
+            var gpuGroup = new GroupBox { Text = "Netteté / traitement DirectX 11", Location = new Point(12, 246), Size = new Size(635, 115) };
+            _sharpenEnabled.Location = new Point(14, 25);
+            var sharpenLabel = new Label { Text = "Douceur / netteté :", AutoSize = true, Location = new Point(14, 73) };
+            _sharpenAmount.Location = new Point(165, 54);
+            _sharpenValue.Location = new Point(555, 73);
+            _sharpenEnabled.CheckedChanged += (s, e) => RefreshVideoEditors();
+            _sharpenAmount.ValueChanged += (s, e) => _sharpenValue.Text = _sharpenAmount.Value + " %";
+            gpuGroup.Controls.AddRange(new Control[] { _sharpenEnabled, sharpenLabel, _sharpenAmount, _sharpenValue });
+            page.Controls.Add(gpuGroup);
+
+            // Anti-aliasing écran, après conversion YUV -> RGB, avant sharpen.
+            // Ce choix n'affecte PAS le format ou la fréquence des samples HDMI.
+            var aaGroup = new GroupBox { Text = "Anti-aliasing DirectX 11", Location = new Point(12, 365), Size = new Size(635, 83) };
+            aaGroup.Controls.Add(new Label { Text = "Mode :", AutoSize = true, Location = new Point(14, 26) });
+            _antiAliasingCombo.Location = new Point(165, 22);
+            _antiAliasingCombo.Items.Add(new SourceChoice("Off", Localization.T("Désactivé")));
+            _antiAliasingCombo.Items.Add(new SourceChoice("FXAA", Localization.T("FXAA — rapide")));
+            _antiAliasingCombo.Items.Add(new SourceChoice("SMAA", Localization.T("SMAA adapté — contours précis")));
+            aaGroup.Controls.Add(_antiAliasingCombo);
+            aaGroup.Controls.Add(new Label
+            {
+                Text = "FXAA : 1 passe GPU. SMAA : plusieurs passes ; plus coûteux en 4K/120 FPS.",
+                AutoSize = true, Location = new Point(14, 56), ForeColor = Color.DimGray
+            });
+            page.Controls.Add(aaGroup);
+
+            // Traitements indépendants du format natif : Standard conserve le rendu
+            // actuel, Bicubic/Adaptive ne modifient que l'interpolation chromatique.
+            var cleanupGroup = new GroupBox { Text = "Nettoyage de l'image (GPU)", Location = new Point(12, 453), Size = new Size(635, 183) };
+            cleanupGroup.Controls.Add(new Label { Text = "Reconstruction chromatique :", AutoSize = true, Location = new Point(14, 27) });
+            _chromaCombo.Location = new Point(180, 23);
+            _chromaCombo.Items.Add(new SourceChoice("Standard", Localization.T("Standard (actuel)")));
+            _chromaCombo.Items.Add(new SourceChoice("Bicubic", Localization.T("Bicubique (qualité)")));
+            _chromaCombo.Items.Add(new SourceChoice("Adaptive", Localization.T("Adaptatif (contours)")));
+            cleanupGroup.Controls.Add(_chromaCombo);
+            cleanupGroup.Controls.Add(new Label
+            {
+                Text = "Interpolation YUY2/NV12 ; le mode avancé peut coûter plus en 4K/120 FPS.",
+                AutoSize = true, Location = new Point(14, 55), MaximumSize = new Size(600, 0), ForeColor = Color.DimGray
+            });
+            _debandEnabled.Location = new Point(14, 94);
+            _debandEnabled.CheckedChanged += (s, e) => RefreshVideoEditors();
+            cleanupGroup.Controls.Add(_debandEnabled);
+            cleanupGroup.Controls.Add(new Label { Text = "Intensité :", AutoSize = true, Location = new Point(14, 146) });
+            _debandStrength.Location = new Point(165, 126);
+            _debandStrength.ValueChanged += (s, e) => _debandValue.Text = _debandStrength.Value + " %";
+            _debandValue.Location = new Point(555, 146);
+            cleanupGroup.Controls.AddRange(new Control[] { _debandStrength, _debandValue });
+            page.Controls.Add(cleanupGroup);
+
+            var sourceGroup = new GroupBox { Text = "Qualité de la source HDMI", Location = new Point(12, 642), Size = new Size(635, 162) };
+            AddChoices(_sourceFormatCombo, "Auto", "YUY2", "UYVY", "NV12", "RGB32", "P010", "MJPEG", "H264", "HEVC");
+            AddChoices(_yuvMatrixCombo, "Auto", "BT.709", "BT.601");
+            AddChoices(_yuvRangeCombo, "Auto", "Limited", "Full");
+            sourceGroup.Controls.Add(new Label { Text = "Format de capture :", Location = new Point(14, 25), AutoSize = true });
+            _sourceFormatCombo.Location = new Point(180, 21);
+            _showCaptureModes.Location = new Point(370, 20);
+            sourceGroup.Controls.Add(_showCaptureModes);
+            sourceGroup.Controls.Add(_sourceFormatCombo);
+            sourceGroup.Controls.Add(new Label { Text = "Matrice YUV → RGB :", Location = new Point(14, 58), AutoSize = true });
+            _yuvMatrixCombo.Location = new Point(180, 54);
+            sourceGroup.Controls.Add(_yuvMatrixCombo);
+            sourceGroup.Controls.Add(new Label { Text = "Plage YUV :", Location = new Point(14, 91), AutoSize = true });
+            _yuvRangeCombo.Location = new Point(180, 87);
+            sourceGroup.Controls.Add(_yuvRangeCombo);
+            _sourceFormatStatus.Location = new Point(14, 119);
+            UpdateActiveVideoStatus();
+            sourceGroup.Controls.Add(_sourceFormatStatus);
+            page.Controls.Add(sourceGroup);
+            page.AutoScrollMinSize = new Size(0, 820);
+
             page.Controls.Add(profileLabel);
             page.Controls.Add(_profileCombo);
             page.Controls.Add(_newProfileButton);
             page.Controls.Add(_renameProfileButton);
             page.Controls.Add(_colorUnavailableLabel);
             page.Controls.Add(_deleteProfileButton);
+        }
+
+        private void PopulateCaptureFpsCombo()
+        {
+            _captureFpsCombo.Items.Clear();
+            foreach (int rate in CaptureFpsPresets)
+                _captureFpsCombo.Items.Add(rate == 0 ? Localization.T("Auto (maximum disponible)") : rate + " FPS");
+            int index = Array.IndexOf(CaptureFpsPresets, _initialConfig.CaptureTargetFps);
+            _captureFpsCombo.SelectedIndex = index >= 0 ? index : 0;
         }
 
         private void PopulateResolutionCombo()
@@ -579,33 +792,59 @@ namespace Broadcaster
 
         private void PopulateColorTab()
         {
-            var procAmp = _captureSession?.VideoProcAmp;
+            string deviceLink = ProfileDeviceLink;
+            bool deviceReady = !string.IsNullOrEmpty(deviceLink);
+            bool isRunningOnSelectedDevice = deviceReady &&
+                string.Equals(_captureSession?.ActiveVideoSymbolicLink, deviceLink, StringComparison.Ordinal);
+            var procAmp = isRunningOnSelectedDevice ? _captureSession?.VideoProcAmp : null;
             _colorTabAvailable = procAmp != null;
 
-            _profileCombo.Enabled = _colorTabAvailable;
-            _newProfileButton.Enabled = _colorTabAvailable;
+            // Les profils et réglages GPU ne dépendent PAS du support matériel
+            // de IAMVideoProcAmp (qui manque sur plusieurs cartes HDMI).
+            _profileCombo.Enabled = deviceReady;
+            _newProfileButton.Enabled = deviceReady;
             _renameProfileButton.Enabled = false;
             _deleteProfileButton.Enabled = false;
-            _colorUnavailableLabel.Visible = !_colorTabAvailable;
+            _colorUnavailableLabel.Visible = !deviceReady || !_colorTabAvailable;
+            _colorUnavailableLabel.Text = !deviceReady
+                ? Localization.T("Sélectionne une source vidéo et clique une première fois sur Appliquer pour créer ses profils.")
+                : Localization.T("Curseurs matériels indisponibles sur cette carte. Les réglages de netteté et de source restent accessibles.");
 
-            if (!_colorTabAvailable) return;
+            if (!deviceReady)
+            {
+                foreach (var row in new[] { _brightnessRow, _contrastRow, _hueRow, _saturationRow })
+                {
+                    row.Supported = false;
+                    row.Track.Enabled = false;
+                    row.ValueLabel.Text = "N/A";
+                }
+                return;
+            }
 
-            SetupRowsRanges();
+            if (_colorTabAvailable)
+                SetupRowsRanges();
+            else
+            {
+                foreach (var row in new[] { _brightnessRow, _contrastRow, _hueRow, _saturationRow })
+                {
+                    row.Supported = false;
+                    row.Track.Enabled = false;
+                    row.ValueLabel.Text = "N/A";
+                }
+            }
 
-            // Devrait toujours exister à ce stade (créé au tout premier démarrage de la
-            // capture pour ce device), mais on se protège si jamais.
-            _profileSet = DeviceColorProfileStore.Load(_captureSession.ActiveVideoSymbolicLink)
-              ?? _captureSession.EnsureFactoryColorProfile()
-              ?? new DeviceColorProfileSet();
+            _profileSet = DeviceColorProfileStore.Load(deviceLink)
+                ?? (isRunningOnSelectedDevice ? _captureSession.EnsureFactoryColorProfile() : null)
+                ?? DeviceColorProfileStore.EnsureFactoryProfileExists(
+                    deviceLink, ProfileDeviceName, new ColorProfile());
 
             _profileCombo.Items.Clear();
-            foreach (var p in _profileSet.Profiles)
-                _profileCombo.Items.Add(p.IsDefault ? Localization.T("Par défaut") : p.Name);
+            foreach (var profile in _profileSet.Profiles)
+                _profileCombo.Items.Add(profile.IsDefault ? Localization.T("Par défaut") : profile.Name);
 
             if (_profileCombo.Items.Count == 0) return;
-
-            int activeIndex = _profileSet.Profiles.FindIndex(p => p.Name == _profileSet.ActiveProfileName);
-            _profileCombo.SelectedIndex = activeIndex >= 0 ? activeIndex : 0;
+            int index = _profileSet.Profiles.FindIndex(p => p.Name == _profileSet.ActiveProfileName);
+            _profileCombo.SelectedIndex = index >= 0 ? index : 0;
             ApplySelectedProfileToUI();
         }
 
@@ -651,6 +890,54 @@ namespace Broadcaster
             SetRowValue(_contrastRow, profile.Contrast, editable);
             SetRowValue(_hueRow, profile.Hue, editable);
             SetRowValue(_saturationRow, profile.Saturation, editable);
+
+            _updatingVideoUi = true;
+            _sharpenEnabled.Checked = editable && profile.SharpenEnabled;
+            _sharpenAmount.Value = Clamp(profile.SharpenAmount, -100, 100);
+            SelectChoice(_antiAliasingCombo, profile.AntiAliasingMode ?? "Off");
+            SelectChoice(_chromaCombo, profile.ChromaUpsamplingMode ?? "Standard");
+            _debandEnabled.Checked = editable && profile.DebandEnabled;
+            _debandStrength.Value = Clamp(profile.DebandStrength, 0, 100);
+            SelectChoice(_sourceFormatCombo, profile.SourceFormat);
+            SelectChoice(_yuvMatrixCombo, profile.YuvMatrix);
+            SelectChoice(_yuvRangeCombo, profile.YuvRange);
+            _updatingVideoUi = false;
+            _previousProfileIndex = _profileCombo.SelectedIndex;
+            RefreshVideoEditors();
+        }
+
+        private void SavePreviousProfileVideoSettings()
+        {
+            if (_updatingVideoUi || _profileSet == null || _previousProfileIndex < 0 ||
+                _previousProfileIndex >= _profileSet.Profiles.Count) return;
+            var p = _profileSet.Profiles[_previousProfileIndex];
+            if (p.IsDefault) return;
+            p.SharpenEnabled = _sharpenEnabled.Checked;
+            p.SharpenAmount = _sharpenAmount.Value;
+            p.AntiAliasingMode = SelectedChoice(_antiAliasingCombo);
+            p.ChromaUpsamplingMode = SelectedChoice(_chromaCombo);
+            p.DebandEnabled = _debandEnabled.Checked;
+            p.DebandStrength = _debandStrength.Value;
+            p.SourceFormat = SelectedChoice(_sourceFormatCombo);
+            p.YuvMatrix = SelectedChoice(_yuvMatrixCombo);
+            p.YuvRange = SelectedChoice(_yuvRangeCombo);
+        }
+
+        private void RefreshVideoEditors()
+        {
+            bool editable = _profileSet != null && _profileCombo.SelectedIndex >= 0 &&
+                !_profileSet.Profiles[_profileCombo.SelectedIndex].IsDefault;
+            _sharpenEnabled.Enabled = editable;
+            _sharpenAmount.Enabled = editable && _sharpenEnabled.Checked;
+            _antiAliasingCombo.Enabled = editable;
+            _chromaCombo.Enabled = editable;
+            _debandEnabled.Enabled = editable;
+            _debandStrength.Enabled = editable && _debandEnabled.Checked;
+            _debandValue.Text = _debandStrength.Value + " %";
+            _sourceFormatCombo.Enabled = editable;
+            _yuvMatrixCombo.Enabled = editable;
+            _yuvRangeCombo.Enabled = editable;
+            _sharpenValue.Text = _sharpenAmount.Value + " %";
         }
 
         private void DeleteSelectedProfile()
@@ -664,7 +951,8 @@ namespace Broadcaster
                 "Broadcaster", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
             if (confirm != DialogResult.Yes) return;
 
-            DeviceColorProfileStore.DeleteProfile(_captureSession.ActiveVideoSymbolicLink, profile);
+            DeviceColorProfileStore.DeleteProfile(ProfileDeviceLink, profile);
+            _previousProfileIndex = -1;
 
             int removedIndex = _profileCombo.SelectedIndex;
             _profileSet.Profiles.RemoveAt(removedIndex);
@@ -703,7 +991,7 @@ namespace Broadcaster
 
             var baseProfile = _profileSet.DefaultProfile ?? _profileSet.Profiles[0];
             var newProfile = baseProfile.Clone(name);
-
+            SavePreviousProfileVideoSettings();
             _profileSet.Profiles.Add(newProfile);
             _profileCombo.Items.Add(newProfile.Name);
             _profileCombo.SelectedIndex = _profileCombo.Items.Count - 1; // déclenche ApplySelectedProfileToUI
@@ -729,7 +1017,7 @@ namespace Broadcaster
             profile.Name = newName;
             _profileCombo.Items[_profileCombo.SelectedIndex] = newName;
 
-            DeviceColorProfileStore.RenameProfile(_captureSession.ActiveVideoSymbolicLink, oldName, profile);
+            DeviceColorProfileStore.RenameProfile(ProfileDeviceLink, oldName, profile);
             if (_profileSet.ActiveProfileName == oldName)
                 _profileSet.ActiveProfileName = newName;
         }
@@ -814,7 +1102,8 @@ namespace Broadcaster
             var selectedAudioCapture = _audioCaptureCombo.SelectedItem as AudioCaptureDeviceInfo;
             var selectedAudioOutput = _audioOutputCombo.SelectedItem as AudioDeviceInfo;
 
-            if (_colorTabAvailable && _profileSet != null && _profileCombo.SelectedIndex >= 0)
+            SavePreviousProfileVideoSettings();
+            if (_profileSet != null && _profileCombo.SelectedIndex >= 0)
             {
                 var profile = _profileSet.Profiles[_profileCombo.SelectedIndex];
 
@@ -824,10 +1113,10 @@ namespace Broadcaster
                     profile.Contrast = _contrastRow.Track.Value;
                     profile.Hue = _hueRow.Track.Value;
                     profile.Saturation = _saturationRow.Track.Value;
-                    DeviceColorProfileStore.SaveProfile(_captureSession.ActiveVideoSymbolicLink, profile);
+                    DeviceColorProfileStore.SaveProfile(ProfileDeviceLink, profile);
                 }
 
-                DeviceColorProfileStore.SetActiveProfile(_captureSession.ActiveVideoSymbolicLink, profile.Name);
+                DeviceColorProfileStore.SetActiveProfile(ProfileDeviceLink, profile.Name);
             }
 
             int selectedWidth, selectedHeight;
@@ -852,6 +1141,9 @@ namespace Broadcaster
                 Volume = _volumeTrack.Value / 100f,
                 Width = selectedWidth,
                 Height = selectedHeight,
+                CaptureTargetFps = CaptureFpsPresets[Math.Max(0, _captureFpsCombo.SelectedIndex)],
+                PreviewVsync = _previewVsyncCheck.Checked,
+                ShowDebugOverlay = _debugOverlayCheck.Checked,
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
                 NoSignalDetectionEnabled = _noSignalEnabledCheck.Checked,
                 AutoReloadOnStart = _autoReloadCheck.Checked,

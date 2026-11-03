@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -17,6 +17,26 @@ namespace Broadcaster
         public int Hue { get; set; }
         public int Saturation { get; set; }
 
+        // Les traitements vidéo appartiennent au profil du périphérique et jamais au
+        // profil "Par défaut". Une ancienne configuration JSON charge les valeurs neutres.
+        public bool SharpenEnabled { get; set; } = false;
+        public int SharpenAmount { get; set; } = 30; // -100 à 100 : flou / neutre / sharpen GPU
+        // Off / FXAA / SMAA. Neutre pour les profils existants (rétrocompatible JSON).
+        public string AntiAliasingMode { get; set; } = "Off";
+        // Standard = reconstruction chroma historique ; Bicubic / Adaptive = meilleure interpolation.
+        // Valeurs neutres pour les anciens JSON et pour le profil d'usine.
+        public string ChromaUpsamplingMode { get; set; } = "Standard";
+        public bool DebandEnabled { get; set; } = false;
+        public int DebandStrength { get; set; } = 30; // 0..100, effet désactivé par défaut
+        public string SourceFormat { get; set; } = "Auto"; // Auto / YUY2 / NV12 / MJPEG
+        public string YuvMatrix { get; set; } = "Auto"; // Auto / BT.709 / BT.601
+        public string YuvRange { get; set; } = "Auto";  // Auto / Limited / Full
+
+        // Tous les profils personnalisés passent par le même chemin GPU,
+        // même lorsque l'utilisateur compare NV12 et YUY2 avec sharpen = 0.
+        // Sinon la comparaison change à la fois le format ET le moteur de rendu.
+        public bool NeedsGpuRenderer => !IsDefault;
+
         public ColorProfile Clone(string newName) => new ColorProfile
         {
             Name = newName,
@@ -24,7 +44,16 @@ namespace Broadcaster
             Brightness = Brightness,
             Contrast = Contrast,
             Hue = Hue,
-            Saturation = Saturation
+            Saturation = Saturation,
+            SharpenEnabled = SharpenEnabled,
+            SharpenAmount = SharpenAmount,
+            AntiAliasingMode = AntiAliasingMode,
+            ChromaUpsamplingMode = ChromaUpsamplingMode,
+            DebandEnabled = DebandEnabled,
+            DebandStrength = DebandStrength,
+            SourceFormat = SourceFormat,
+            YuvMatrix = YuvMatrix,
+            YuvRange = YuvRange
         };
     }
 

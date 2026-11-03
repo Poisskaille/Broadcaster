@@ -52,7 +52,9 @@ namespace Broadcaster
 
         public static string T(string french)
         {
-            if (string.IsNullOrEmpty(french) || _language == "fr") return french;
+            if (string.IsNullOrEmpty(french)) return french;
+            if (_language == "fr")
+                return FrenchTechnicalChoices.TryGetValue(french, out string uiTerm) ? uiTerm : french;
             Dictionary<string, string> translations;
             switch (_language)
             {
@@ -65,8 +67,12 @@ namespace Broadcaster
                 default: translations = English; break;
             }
             if (translations.TryGetValue(french, out string translated)) return translated;
-            // Repli sur l'anglais pour les traductions manquantes, y compris les textes nouveaux.
-            return English.TryGetValue(french, out translated) ? translated : french;
+            if (FeatureTranslations.TryGetValue(_language, out var featureLanguage) &&
+                featureLanguage.TryGetValue(french, out translated)) return translated;
+            // Consistent English fallback when a new translation is missing.
+            if (English.TryGetValue(french, out translated)) return translated;
+            if (FeatureTranslations["en"].TryGetValue(french, out translated)) return translated;
+            return french;
         }
 
         public static string F(string frenchFormat, params object[] args) =>
@@ -93,9 +99,9 @@ namespace Broadcaster
             ["Écran (plein écran) :"] = "Screen (fullscreen):",
             ["Résolution :"] = "Resolution:",
             ["Volume :"] = "Volume:",
-            ["Capture Source :"] = "Video capture source:",
-            ["Audio Capture (if need to separate audio and video)"] = "Audio capture (if separate from video):",
-            ["Audio Output :"] = "Audio output:",
+            ["Source de capture vidéo :"] = "Video capture source:",
+            ["Capture audio (si distincte de la vidéo)"] = "Audio capture (if separate from video):",
+            ["Sortie audio :"] = "Audio output:",
             ["Langue de l'application :"] = "Application language:",
             ["Écran"] = "Display",
             [" (Principal)"] = " (Primary)",

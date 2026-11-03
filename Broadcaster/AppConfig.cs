@@ -19,6 +19,10 @@ namespace Broadcaster
 
         public int Width { get; set; } = 1920;
         public int Height { get; set; } = 1080;
+        // 0 = best native rate at chosen resolution; otherwise closest native rate.
+        public int CaptureTargetFps { get; set; } = 0;
+        public bool PreviewVsync { get; set; } = false; // can cap preview to monitor refresh
+        public bool ShowDebugOverlay { get; set; } = false; // Extras : panneau diagnostic désactivé par défaut
 
         public string DisplayDeviceName { get; set; } = "";
         public KeyBindings Bindings { get; set; } = new KeyBindings();
@@ -64,6 +68,12 @@ namespace Broadcaster
                 if (values.TryGetValue("Volume", out var vol) && float.TryParse(vol, out var f)) config.Volume = f;
                 if (values.TryGetValue("Width", out var w) && int.TryParse(w, out var _w)) config.Width = _w;
                 if (values.TryGetValue("Height", out var h) && int.TryParse(h, out var _h)) config.Height = _h;
+                if (values.TryGetValue("CaptureTargetFps", out var captureFps) && int.TryParse(captureFps, out var desired))
+                    config.CaptureTargetFps = desired >= 0 && desired <= 240 ? desired : 0;
+                if (values.TryGetValue("PreviewVsync", out var vsyncValue) && bool.TryParse(vsyncValue, out var vsync))
+                    config.PreviewVsync = vsync;
+                if (values.TryGetValue("ShowDebugOverlay", out var overlayValue) && bool.TryParse(overlayValue, out var overlay))
+                    config.ShowDebugOverlay = overlay;
                 if (values.TryGetValue("DisplayDeviceName", out var dn)) config.DisplayDeviceName = dn;
                 if (values.TryGetValue("NoSignalDetectionEnabled", out var nsd) && bool.TryParse(nsd, out var _nsd)) config.NoSignalDetectionEnabled = _nsd;
 
@@ -128,6 +138,9 @@ namespace Broadcaster
                     $"Volume={Volume}",
                     $"Width={Width}",
                     $"Height={Height}",
+                    $"CaptureTargetFps={CaptureTargetFps}",
+                    $"PreviewVsync={PreviewVsync}",
+                    $"ShowDebugOverlay={ShowDebugOverlay}",
                     $"DisplayDeviceName={DisplayDeviceName}",
                     $"NoSignalDetectionEnabled={NoSignalDetectionEnabled}",
                     $"Key_OpenMenu={Bindings.OpenMenu}",

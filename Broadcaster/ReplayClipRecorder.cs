@@ -121,7 +121,7 @@ namespace Broadcaster
                     Localization.T("Résolution de clip non prise en charge (maximum 3840 x 2160)."));
             if (targetFps < 10 || targetFps > 60)
                 throw new ArgumentOutOfRangeException(nameof(targetFps),
-                    "Le FPS cible doit être compris entre 10 et 60.");
+                    Localization.T("Le FPS cible doit être compris entre 10 et 60."));
             Stop();
             lock (_sync)
             {

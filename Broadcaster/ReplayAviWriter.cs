@@ -27,8 +27,8 @@ namespace Broadcaster
         {
             if (width < 160 || height < 120 || width > 3840 || height > 2160 ||
                 fps < 10 || fps > 60)
-                throw new ArgumentException("Paramètres de vidéo invalides.");
-            if (source == null || source.Count < 1) throw new InvalidOperationException("Tampon vidéo vide.");
+                throw new ArgumentException(Localization.T("Paramètres de vidéo invalides."));
+            if (source == null || source.Count < 1) throw new InvalidOperationException(Localization.T("Tampon vidéo vide."));
 
             // Images sources horodatées. Un rééchantillonnage au plus proche
             // minimise les doublons dus au décalage entre capture et grille 60 FPS.
@@ -89,8 +89,7 @@ namespace Broadcaster
                 ? (long)alignedPcm.Length + (long)frameCount * 8 + 8 : 0;
             long projectedIndexBytes = (long)frameCount * (audioAvailable ? 2 : 1) * 16;
             if (projectedVideoBytes + projectedAudioBytes + projectedIndexBytes + 8192 > maxFileBytes)
-                throw new IOException("Clip trop volumineux pour le format AVI. " +
-                    "Réduis le FPS cible, la résolution de la source ou la durée du clip dans les options.");
+                throw new IOException(Localization.T("Clip trop volumineux pour le format AVI. Réduis le FPS cible, la résolution de la source ou la durée du clip dans les options."));
 
             using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             using (var writer = new BinaryWriter(file))

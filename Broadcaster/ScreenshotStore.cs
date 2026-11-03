@@ -30,7 +30,7 @@ namespace Broadcaster
             if (videoSurface == null || !videoSurface.IsHandleCreated ||
                 videoSurface.ClientSize.Width <= 0 || videoSurface.ClientSize.Height <= 0)
             {
-                throw new InvalidOperationException("Le flux vidéo n'est pas disponible.");
+                throw new InvalidOperationException(Localization.T("Le flux vidéo n’est pas disponible."));
             }
 
             // Capture le panneau vidéo, pas l'écran entier ni les bordures de fenêtre.

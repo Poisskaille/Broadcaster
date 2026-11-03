@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using SharpDX;
 using SharpDX.Mathematics.Interop;
@@ -10,6 +11,16 @@ namespace Broadcaster
 {
     public static class MediaEngine
     {
+        // Sous-types Media Foundation pour les périphériques de capture HDMI.
+        internal static readonly Guid VideoYuy2 = new Guid("32595559-0000-0010-8000-00AA00389B71");
+        internal static readonly Guid VideoNv12 = new Guid("3231564E-0000-0010-8000-00AA00389B71");
+        internal static readonly Guid VideoMjpg = new Guid("47504A4D-0000-0010-8000-00AA00389B71");
+        internal static readonly Guid VideoRgb32 = new Guid("00000016-0000-0010-8000-00AA00389B71");
+        internal static readonly Guid VideoUyvy = new Guid("59565955-0000-0010-8000-00AA00389B71");
+        internal static readonly Guid VideoH264 = new Guid("34363248-0000-0010-8000-00AA00389B71");
+        internal static readonly Guid VideoHevc = new Guid("43564548-0000-0010-8000-00AA00389B71");
+        internal static readonly Guid VideoP010 = new Guid("30313050-0000-0010-8000-00AA00389B71");
+
         private static readonly Guid MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID =
             new Guid("8AC3587A-4AE7-42D8-99E0-0A6013EEF90F");
 
@@ -82,8 +93,24 @@ namespace Broadcaster
     public class CaptureSession : IDisposable
     {
         private MediaSession _videoSession;
+        private D3D11CaptureRenderer _gpuRenderer;
+        private ColorProfile _videoSettings;
+        public string ActiveSourceFormat { get; private set; } = "";
+        public string ActiveVideoWarning { get; private set; } = "";
+        internal List<CaptureVideoMode> AvailableVideoModes { get; } = new List<CaptureVideoMode>();
+        private double _selectedSourceFps = 60.0;
+        // Mode réellement accepté par le pilote, différent de la résolution demandée en cas de repli.
+        internal CaptureVideoMode ActiveVideoMode { get; private set; }
+        // -1 : pipeline EVR natif (aucun callback de samples, impossible de mesurer ces FPS).
+        public long ReceivedVideoSamples => _gpuRenderer == null ? -1 : _gpuRenderer.ReceivedSamples;
+        public long PresentedVideoSamples => _gpuRenderer == null ? -1 : _gpuRenderer.PresentedSamples;
+        public double MeasuredGpuFps => _gpuRenderer?.MeasuredFps ?? 0.0;
         private Topology _videoTopology;
         private MediaSource _videoSource;
+        // IMFActivate conserve l'instance activée jusqu'à ShutdownObject().
+        // Appeler seulement MediaSource.Shutdown() laisse une source morte en cache
+        // et provoque MF_E_SHUTDOWN (0xC00D3E85) lors d'une nouvelle activation.
+        private Activate _videoSourceActivate;
         private Activate _videoRendererActivate;
         private Thread _videoEventThread;
         private volatile bool _videoRunning;
@@ -91,6 +118,7 @@ namespace Broadcaster
         private MediaSession _audioSession;
         private Topology _audioTopology;
         private MediaSource _audioSource;
+        private Activate _audioSourceActivate;
         private Activate _audioRendererActivate;
         private int _lastRequestedWidth;
         private int _lastRequestedHeight;
@@ -101,6 +129,9 @@ namespace Broadcaster
         private string _audioEndpointId;
 
         public event Action<string> OnError;
+        // Distinct des erreurs audio : seules les erreurs du flux vidéo peuvent
+        // déclencher un repli du format manuel vers Auto côté interface.
+        public event Action<string> OnVideoRenderFailure;
         public event Action OnVideoSessionStarted;
 
         public float CurrentVolume { get; private set; } = 1.0f;
@@ -109,7 +140,8 @@ namespace Broadcaster
 
 
         public void Start(VideoDeviceInfo videoDevice, AudioDeviceInfo audioOutputDevice, AudioCaptureDeviceInfo audioCaptureDevice,
-                           IntPtr renderHwnd, int targetWidth, int targetHeight)
+                           IntPtr renderHwnd, int targetWidth, int targetHeight, ColorProfile videoSettings = null,
+                           int captureTargetFps = 0, bool previewVsync = false)
         {
             Stop();
 
@@ -119,20 +151,28 @@ namespace Broadcaster
                 throw new InvalidOperationException(Localization.T("Le device vidéo n'a pas d'activateur valide. Ouvre les options et resélectionne-le dans la liste."));
 
             _audioEndpointId = audioOutputDevice?.EndpointId;
+            _videoSettings = videoSettings != null && !videoSettings.IsDefault ? videoSettings : null;
 
-            StartVideoSession(videoDevice, renderHwnd, targetWidth, targetHeight);
-
-            if (audioCaptureDevice?.Activate != null)
+            try
             {
-                StartAudioSession(audioCaptureDevice);
-            }
+                StartVideoSession(videoDevice, renderHwnd, targetWidth, targetHeight, captureTargetFps, previewVsync);
 
-            SetVolume(CurrentVolume);
+                if (audioCaptureDevice?.Activate != null)
+                    StartAudioSession(audioCaptureDevice);
+
+                SetVolume(CurrentVolume);
+            }
+            catch
+            {
+                // Une ouverture partielle ne doit jamais empoisonner la prochaine capture.
+                try { Stop(); } catch { /* Conserver l'erreur de démarrage initiale. */ }
+                throw;
+            }
         }
 
         public void EnsureVideoDisplayControl(int attemptsLeft = 6)
         {
-            if (_videoDisplayControl != null) return;
+            if (_gpuRenderer != null || _videoDisplayControl != null) return;
 
             _videoDisplayControl = VideoDisplayPositionControl.TryCreate(_videoSession);
 
@@ -158,9 +198,10 @@ namespace Broadcaster
             }
         }
 
-        private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight)
+        private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps, bool previewVsync)
         {
-            _videoSource = videoDevice.Activate.ActivateObject<MediaSource>();
+            _videoSourceActivate = videoDevice.Activate;
+            _videoSource = _videoSourceActivate.ActivateObject<MediaSource>();
             _videoProcAmp = VideoProcAmpControl.TryCreate(_videoSource);
             ActiveVideoSymbolicLink = videoDevice.SymbolicLink;
             ActiveVideoFriendlyName = videoDevice.FriendlyName;
@@ -170,6 +211,27 @@ namespace Broadcaster
 
             _videoSource.CreatePresentationDescriptor(out PresentationDescriptor presDescriptor);
 
+            if (_videoSettings != null && _videoSettings.NeedsGpuRenderer)
+            {
+                // Le moteur Direct3D 11 lit les samples de Media Foundation et applique
+                // la conversion YUV puis l'unsharp mask dans un pixel shader.
+                for (int i = 0; i < presDescriptor.StreamDescriptorCount; i++)
+                {
+                    presDescriptor.GetStreamDescriptorByIndex(i, out RawBool selected, out StreamDescriptor streamDescriptor);
+                    if (!selected || streamDescriptor.MediaTypeHandler.MajorType != MediaTypeGuids.Video) continue;
+                    ActiveSourceFormat = ApplyBestVideoFormat(streamDescriptor.MediaTypeHandler, targetWidth, targetHeight, targetFps, _videoSettings.SourceFormat);
+                    break;
+                }
+                D3D11CaptureRenderer renderer = null;
+                renderer = new D3D11CaptureRenderer(_videoSource, renderHwnd, _videoSettings, _selectedSourceFps, previewVsync,
+                    () => { if (ReferenceEquals(_gpuRenderer, renderer)) OnVideoSessionStarted?.Invoke(); },
+                    message => { if (ReferenceEquals(_gpuRenderer, renderer)) OnVideoRenderFailure?.Invoke(message); });
+                _gpuRenderer = renderer;
+                _videoRunning = true;
+                _gpuRenderer.Start();
+                return;
+            }
+
             for (int i = 0; i < presDescriptor.StreamDescriptorCount; i++)
             {
                 presDescriptor.GetStreamDescriptorByIndex(i, out RawBool selected, out StreamDescriptor streamDescriptor);
@@ -178,7 +240,7 @@ namespace Broadcaster
                 MediaTypeHandler handler = streamDescriptor.MediaTypeHandler;
                 if (handler.MajorType != MediaTypeGuids.Video) continue;
 
-                ApplyBestVideoFormat(handler, targetWidth, targetHeight);
+                ActiveSourceFormat = ApplyBestVideoFormat(handler, targetWidth, targetHeight, targetFps, _videoSettings?.SourceFormat);
 
                 TopologyNode sourceNode = CreateSourceNode(_videoTopology, _videoSource, presDescriptor, streamDescriptor);
                 MediaFactory.CreateVideoRendererActivate(renderHwnd, out Activate videoRendererActivate);
@@ -245,7 +307,8 @@ namespace Broadcaster
 
         private void StartAudioSession(AudioCaptureDeviceInfo audioCaptureDevice)
         {
-            _audioSource = audioCaptureDevice.Activate.ActivateObject<MediaSource>();
+            _audioSourceActivate = audioCaptureDevice.Activate;
+            _audioSource = _audioSourceActivate.ActivateObject<MediaSource>();
 
             MediaFactory.CreateTopology(out Topology topology);
             _audioTopology = topology;
@@ -286,41 +349,87 @@ namespace Broadcaster
             _audioSession.Start(null, varStart);
         }
 
-        private static void ApplyBestVideoFormat(MediaTypeHandler handler, int wantedWidth, int wantedHeight)
+
+        internal static string NameOfFormat(Guid subtype)
         {
-            MediaType best = null;
-            double bestScore = double.MinValue;
+            if (subtype == MediaEngine.VideoYuy2) return "YUY2";
+            if (subtype == MediaEngine.VideoNv12) return "NV12";
+            if (subtype == MediaEngine.VideoMjpg) return "MJPEG";
+            if (subtype == MediaEngine.VideoRgb32) return "RGB32";
+            if (subtype == MediaEngine.VideoUyvy) return "UYVY";
+            if (subtype == MediaEngine.VideoH264) return "H264";
+            if (subtype == MediaEngine.VideoHevc) return "HEVC";
+            if (subtype == MediaEngine.VideoP010) return "P010";
+            return subtype.ToString();
+        }
 
-            int count = handler.MediaTypeCount;
-            for (int i = 0; i < count; i++)
+        private string ApplyBestVideoFormat(MediaTypeHandler handler, int wantedWidth,
+            int wantedHeight, int targetFps, string requestedFormat)
+        {
+            var modes = CaptureModeSelector.Enumerate(handler);
+            AvailableVideoModes.AddRange(modes);
+            var ranked = CaptureModeSelector.Rank(modes, wantedWidth,
+                wantedHeight, targetFps, requestedFormat);
+            bool manualFormat = !string.IsNullOrWhiteSpace(requestedFormat) &&
+                !string.Equals(requestedFormat, "Auto", StringComparison.OrdinalIgnoreCase);
+            if (manualFormat && ranked.Count == 0)
+                throw new InvalidOperationException(Localization.F(
+                    "Format {0} indisponible : le pilote ne propose aucun mode de capture dans ce format. Choisis Auto ou un format annoncé dans Modes de la carte.",
+                    requestedFormat));
+            CaptureVideoMode chosen = null;
+            Exception lastError = null;
+            // A driver can advertise a type that it then rejects. Try the next
+            // native mode instead of aborting the entire capture immediately.
+            foreach (var candidate in ranked)
             {
-                MediaType mt = handler.GetMediaTypeByIndex(i);
-
-                ulong packedSize = (ulong)mt.Get(MediaTypeAttributeKeys.FrameSize);
-                int width = (int)(packedSize >> 32);
-                int height = (int)(packedSize & 0xFFFFFFFF);
-
-                ulong packedRate = (ulong)mt.Get(MediaTypeAttributeKeys.FrameRate);
-                int fpsNum = (int)(packedRate >> 32);
-                int fpsDen = (int)(packedRate & 0xFFFFFFFF);
-                double fps = fpsDen == 0 ? 0 : (double)fpsNum / fpsDen;
-
-                // Priorité écrasante à la résolution demandée ; à résolution égale, on
-                // départage en prenant le FPS le plus haut proposé par le device.
-                double score = 0;
-                if (width == wantedWidth && height == wantedHeight) score += 1_000_000;
-                score -= Math.Abs(width - wantedWidth) + Math.Abs(height - wantedHeight);
-                score += fps;
-
-                if (score > bestScore)
+                try
                 {
-                    bestScore = score;
-                    best = mt;
+                    using (var type = handler.GetMediaTypeByIndex(candidate.NativeIndex))
+                        handler.CurrentMediaType = type;
+                    // Some drivers accept SetCurrentMediaType but negotiate a different
+                    // subtype. Validate the readback so a forced YUY2 cannot be shown
+                    // as successful if the device actually selected NV12.
+                    using (var accepted = handler.CurrentMediaType)
+                    {
+                        string actualFormat = NameOfFormat(accepted.Get<Guid>(MediaTypeAttributeKeys.Subtype));
+                        if (actualFormat != candidate.Format)
+                            throw new InvalidOperationException(Localization.F(
+                                "Le pilote a remplacé le format demandé {0} par {1}.",
+                                candidate.Format, actualFormat));
+                    }
+                    chosen = candidate;
+                    break;
                 }
+                catch (Exception ex) { lastError = ex; }
+            }
+            if (chosen == null)
+            {
+                if (manualFormat)
+                    throw new InvalidOperationException(Localization.F(
+                        "Format {0} refusé : aucun mode annoncé dans ce format n'a été accepté par le pilote. La capture ne bascule pas automatiquement vers NV12 ; choisis Auto si tu veux un repli.",
+                        requestedFormat), lastError);
+                throw new InvalidOperationException(
+                    Localization.T("Aucun mode vidéo utilisable (YUY2/UYVY/NV12/RGB32/P010/MJPEG/H264/HEVC) n’a été accepté par ce périphérique."), lastError);
             }
 
-            if (best != null)
-                handler.CurrentMediaType = best;
+            _selectedSourceFps = chosen.Fps;
+            ActiveVideoMode = chosen;
+            var warning = new List<string>();
+            if (chosen.Width != wantedWidth || chosen.Height != wantedHeight)
+                warning.Add(Localization.T("Résolution de repli : la carte ne propose pas le mode demandé."));
+            if (targetFps > 0 && Math.Abs(chosen.Fps - targetFps) > 1.1)
+                warning.Add(Localization.T("FPS de repli : fréquence demandée indisponible."));
+            // With an explicit format, a lower FPS / resolution is allowed, but
+            // another format is never an acceptable fallback.
+            if (chosen.Format == "P010")
+                warning.Add(Localization.T("P010 10 bits : rendu SDR uniquement, sans tone mapping HDR."));
+            if (chosen.UncompressedMiBPerSecond > 350)
+                warning.Add(Localization.F("Flux brut ~{0} Mio/s : vérifier le débit USB/PCIe réel.",
+                    chosen.UncompressedMiBPerSecond.ToString("0")));
+            else if (chosen.UncompressedMiBPerSecond > 110)
+                warning.Add(Localization.T("Flux non compressé : connexion USB 3.x/PCIe conseillée."));
+            ActiveVideoWarning = string.Join("  ", warning);
+            return chosen.Description;
         }
 
         private static TopologyNode CreateSourceNode(Topology topology, MediaSource source, PresentationDescriptor pd, StreamDescriptor sd)
@@ -343,12 +452,16 @@ namespace Broadcaster
 
         private void EventLoop(MediaSession session, Func<bool> isRunning, string label)
         {
-            while (isRunning() && session != null)
+            while (isRunning() && session != null &&
+                (label == "vidéo" ? ReferenceEquals(session, _videoSession) : ReferenceEquals(session, _audioSession)))
             {
                 try
                 {
                     using (MediaEvent evt = session.GetEvent(false))
                     {
+                        // Ignore les notifications tardives d'une ancienne session.
+                        if (label == "vidéo" && !ReferenceEquals(session, _videoSession)) break;
+                        if (label != "vidéo" && !ReferenceEquals(session, _audioSession)) break;
                         if (evt.TypeInfo == MediaEventTypes.SessionStarted && label == "vidéo")
                         {
                             OnVideoSessionStarted?.Invoke();
@@ -363,7 +476,9 @@ namespace Broadcaster
                         int status = (int)evt.Status;
                         if (status < 0)
                         {
-                            OnError?.Invoke(Localization.F("Erreur Media Foundation ({0}, code 0x{1:X8}) sur l'évènement {2}.", label, status, evt.TypeInfo));
+                            string message = Localization.F("Erreur Media Foundation ({0}, code 0x{1:X8}) sur l'évènement {2}.", label, status, evt.TypeInfo);
+                            if (label == "vidéo") OnVideoRenderFailure?.Invoke(message);
+                            else OnError?.Invoke(message);
                         }
                     }
                 }
@@ -379,6 +494,7 @@ namespace Broadcaster
             _lastRequestedWidth = width;
             _lastRequestedHeight = height;
             _videoDisplayControl?.Resize(width, height);
+            _gpuRenderer?.Resize(width, height);
         }
 
         public void SetVolume(float volume0to1)
@@ -414,6 +530,18 @@ namespace Broadcaster
         {
             _videoRunning = false;
             _audioRunning = false;
+            // Le lecteur DirectX doit quitter ReadSample AVANT l'arrêt de sa source.
+            if (_gpuRenderer != null)
+            {
+                try { _gpuRenderer.Dispose(); }
+                catch (Exception)
+                {
+                    // Le thread du pilote peut refuser de terminer. On poursuit
+                    // malgré tout la libération de la session et des activateurs ;
+                    // ne jamais empêcher l'utilisateur d'ouvrir les Options.
+                }
+                finally { _gpuRenderer = null; }
+            }
 
             try { _videoSession?.Stop(); } catch { }
             try { _videoSession?.Close(); } catch { }
@@ -423,23 +551,53 @@ namespace Broadcaster
             _videoEventThread?.Join(500);
             _audioEventThread?.Join(500);
 
-            _videoSession?.Dispose(); _videoSession = null;
-            _audioSession?.Dispose(); _audioSession = null;
+            try { _videoSession?.Dispose(); } catch { } finally { _videoSession = null; }
+            try { _audioSession?.Dispose(); } catch { } finally { _audioSession = null; }
 
-            _videoTopology?.Dispose(); _videoTopology = null;
-            _audioTopology?.Dispose(); _audioTopology = null;
+            try { _videoTopology?.Dispose(); } catch { } finally { _videoTopology = null; }
+            try { _audioTopology?.Dispose(); } catch { } finally { _audioTopology = null; }
 
-            _videoProcAmp?.Dispose(); _videoProcAmp = null;
+            try { _videoProcAmp?.Dispose(); } catch { } finally { _videoProcAmp = null; }
             ActiveVideoSymbolicLink = null;
             ActiveVideoFriendlyName = null;
+            ActiveSourceFormat = "";
+            ActiveVideoWarning = "";
+            AvailableVideoModes.Clear();
+            _selectedSourceFps = 60.0;
+            ActiveVideoMode = null;
+            _videoSettings = null;
 
-            _videoDisplayControl?.Dispose(); _videoDisplayControl = null;
+            try { _videoDisplayControl?.Dispose(); } catch { } finally { _videoDisplayControl = null; }
 
-            _videoSource?.Shutdown(); _videoSource?.Dispose(); _videoSource = null;
-            _audioSource?.Shutdown(); _audioSource?.Dispose(); _audioSource = null;
+            // Important : c'est l'activateur qui doit libérer sa référence cachée.
+            // ShutdownObject() détruit l'instance actuelle et permet à ActivateObject()
+            // de créer une source NEUVE après un ReloadCapture() (vidéo ET audio).
+            ShutdownActivatedSource(_videoSourceActivate, _videoSource);
+            try { _videoSource?.Dispose(); } catch { } finally { _videoSource = null; }
+            _videoSourceActivate = null;
+            ShutdownActivatedSource(_audioSourceActivate, _audioSource);
+            try { _audioSource?.Dispose(); } catch { } finally { _audioSource = null; }
+            _audioSourceActivate = null;
 
-            _videoRendererActivate?.Dispose(); _videoRendererActivate = null;
-            _audioRendererActivate?.Dispose(); _audioRendererActivate = null;
+            try { _videoRendererActivate?.Dispose(); } catch { } finally { _videoRendererActivate = null; }
+            try { _audioRendererActivate?.Dispose(); } catch { } finally { _audioRendererActivate = null; }
+        }
+
+        private static void ShutdownActivatedSource(Activate activate, MediaSource source)
+        {
+            if (activate != null)
+            {
+                try
+                {
+                    activate.ShutdownObject();
+                    return;
+                }
+                catch
+                {
+                    // Pilote ou activation déjà arrêtée : libérer au mieux la source.
+                }
+            }
+            try { source?.Shutdown(); } catch { }
         }
 
         public void Dispose() => Stop();

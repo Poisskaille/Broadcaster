@@ -1,5 +1,7 @@
 using System;
 using System.Drawing;
+using System.Diagnostics;
+using System.Globalization;
 using System.Windows.Forms;
 
 namespace Broadcaster
@@ -9,6 +11,13 @@ namespace Broadcaster
         private readonly CaptureSession _capture = new CaptureSession();
         private readonly Panel _renderSurface = new Panel();
         private AppConfig _config;
+        // Overlay indépendant du HWND D3D/EVR. Ne modifie ni le pipeline ni les samples.
+        private DebugPerformanceOverlay _debugOverlay;
+        private ProcessPerformanceMonitor _debugMonitor;
+        private readonly System.Windows.Forms.Timer _debugRefreshTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        private readonly Stopwatch _debugFpsClock = new Stopwatch();
+        private long _lastReceivedSamples = -1;
+        private long _lastPresentedSamples = -1;
 
         // Replay : tampon vidéo/audio des dernières secondes (désactivé par défaut).
         private readonly ReplayClipRecorder _clipRecorder = new ReplayClipRecorder();
@@ -39,6 +48,11 @@ namespace Broadcaster
         // --- Menu options / curseur ---
         private bool _isOptionsOpen;
         private bool _cursorHidden;
+        // Une erreur asynchrone de démarrage GPU ne doit pas emprisonner l'utilisateur
+        // dans une fenêtre vidéo noire : au plus un repli Auto par session ratée.
+        private bool _videoRecoveryPending;
+        private bool _unrecoverableErrorShown;
+        private bool _reopenOptionsScheduled;
 
         public MainForm()
         {
@@ -58,14 +72,23 @@ namespace Broadcaster
             Shown += MainForm_Shown;
             FormClosing += MainForm_FormClosing;
             ResizeEnd += MainForm_ResizeEnd;
+            Move += (s, e) => PositionDebugOverlay();
+            SizeChanged += (s, e) => PositionDebugOverlay();
+            _debugRefreshTimer.Tick += (s, e) => RefreshDebugOverlay();
 
             _capture.OnError += message =>
             {
-                if (IsHandleCreated)
-                {
-                    BeginInvoke((Action)(() =>
-                        MessageBox.Show(this, message, Localization.T("Erreur de capture"), MessageBoxButtons.OK, MessageBoxIcon.Error)));
-                }
+                // Erreurs audio et autres diagnostics : une seule boîte par session,
+                // pour ne pas empiler des dialogues modaux sur les paramètres.
+                if (!IsDisposed && IsHandleCreated)
+                    BeginInvoke((Action)(() => ShowCaptureErrorOnce(message)));
+            };
+            _capture.OnVideoRenderFailure += message =>
+            {
+                // Les échecs SourceReader / D3D11 arrivent sur un thread de capture,
+                // parfois APRES le retour réussi de CaptureSession.Start().
+                if (!IsDisposed && IsHandleCreated)
+                    BeginInvoke((Action)(() => HandleVideoRenderFailure(message)));
             };
 
             _capture.OnVideoSessionStarted += () =>
@@ -99,6 +122,7 @@ namespace Broadcaster
             {
                 _capture.ResizeVideoWindow(_renderSurface.ClientSize.Width, _renderSurface.ClientSize.Height);
                 UpdateNoSignalBounds();
+                PositionDebugOverlay();
             };
 
             _noSignalDetector = new NoSignalDetector(SampleIsDark, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
@@ -135,6 +159,7 @@ namespace Broadcaster
             Localization.UseLanguage(_config.Language);
             EnterFullscreen();
             _clipRegionTimer.Start();
+            ApplyDebugOverlaySetting();
 
             if (_config.NoSignalDetectionEnabled)
                 _noSignalDetector.Start();
@@ -156,14 +181,21 @@ namespace Broadcaster
         public bool PreFilterMessage(ref Message message)
         {
             if ((message.Msg != 0x100 && message.Msg != 0x104) ||
-                _isOptionsOpen || _config == null || !_config.ClipsEnabled ||
+                _isOptionsOpen || _config == null ||
                 !(ContainsFocus || Form.ActiveForm == this))
                 return false;
 
             Keys pressed = ((Keys)message.WParam.ToInt32() & Keys.KeyCode) | ModifierKeys;
-            if (pressed != _config.Bindings.Clip) return false;
-            if ((message.LParam.ToInt64() & 0x40000000) == 0)
-                TakeClip();
+            bool firstPress = (message.LParam.ToInt64() & 0x40000000) == 0;
+            // Le raccourci des Options doit rester accessible même si la capture
+            // a échoué et même si le composant vidéo possède le focus clavier.
+            if (pressed == _config.Bindings.OpenMenu)
+            {
+                if (firstPress) OpenOptions();
+                return true;
+            }
+            if (!_config.ClipsEnabled || pressed != _config.Bindings.Clip) return false;
+            if (firstPress) TakeClip();
             return true;
         }
 
@@ -367,6 +399,7 @@ namespace Broadcaster
             bool cursorWasHidden = _cursorHidden;
             SetCursorHidden(false);
             _isOptionsOpen = true;
+            _debugOverlay?.Hide();
             _clipRecorder.SetCaptureBounds(Rectangle.Empty);
             _clipRecorder.ClearBuffer();
 
@@ -380,6 +413,7 @@ namespace Broadcaster
                         Localization.UseLanguage(_config.Language);
                         _config.Save();
                         MoveFullscreenToConfiguredScreen();
+                        ApplyDebugOverlaySetting();
 
                         if (_config.NoSignalDetectionEnabled)
                         {
@@ -398,13 +432,82 @@ namespace Broadcaster
             finally
             {
                 _isOptionsOpen = false;
+                PositionDebugOverlay();
                 SetCursorHidden(cursorWasHidden);
                 UpdateClipCaptureBounds();
             }
         }
 
         // --- Capture ---
-        private void StartCaptureFromConfig()
+        private bool TrySwitchActiveFormatToAuto(out ColorProfile automaticProfile)
+        {
+            automaticProfile = null;
+            if (_config == null || string.IsNullOrEmpty(_config.VideoSymbolicLink)) return false;
+            var set = DeviceColorProfileStore.Load(_config.VideoSymbolicLink);
+            var profile = set?.ActiveProfile;
+            if (profile == null || profile.IsDefault ||
+                string.IsNullOrWhiteSpace(profile.SourceFormat) ||
+                string.Equals(profile.SourceFormat, "Auto", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            profile.SourceFormat = "Auto";
+            automaticProfile = profile;
+            // Persister immédiatement : la prochaine ouverture des Options et le
+            // prochain démarrage doivent afficher Auto, et non l'ancien mode cassé.
+            DeviceColorProfileStore.SaveProfile(_config.VideoSymbolicLink, profile);
+            return true;
+        }
+
+        private void ShowCaptureErrorOnce(string message)
+        {
+            if (_unrecoverableErrorShown || IsDisposed) return;
+            _unrecoverableErrorShown = true;
+            MessageBox.Show(this, message, Localization.T("Erreur de capture"),
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private void OpenOptionsAfterCaptureFailure(string message)
+        {
+            _autoReloadTimer.Stop();
+            ShowCaptureErrorOnce(message);
+            // Ne jamais enfermer l'utilisateur sur un écran noir. Si la fenêtre
+            // Options est déjà ouverte, la laisser libre et ne pas en ouvrir une seconde.
+            if (!_reopenOptionsScheduled && !IsDisposed && IsHandleCreated)
+            {
+                _reopenOptionsScheduled = true;
+                BeginInvoke((Action)(() =>
+                {
+                    _reopenOptionsScheduled = false;
+                    if (!_isOptionsOpen && !IsDisposed) OpenOptions();
+                }));
+            }
+        }
+
+        private void HandleVideoRenderFailure(string message)
+        {
+            if (_isOptionsOpen || _videoRecoveryPending || IsDisposed) return;
+            _videoRecoveryPending = true;
+            try
+            {
+                if (TrySwitchActiveFormatToAuto(out ColorProfile automaticProfile))
+                {
+                    _autoReloadTimer.Stop();
+                    // La source GPU a quitté son thread après avoir signalé l'erreur.
+                    // Recréer l'activateur Media Foundation et la session en Auto.
+                    StartCaptureFromConfig(automaticProfile);
+                    return;
+                }
+
+                // Auto aussi a échoué : pas de boucle de tentatives infinie.
+                // L'utilisateur retrouve les Options pour changer de carte / mode.
+                try { _capture.Stop(); } catch { }
+                OpenOptionsAfterCaptureFailure(message + "\n" +
+                    Localization.T("Ouvre les options pour choisir un autre mode ou périphérique."));
+            }
+            finally { _videoRecoveryPending = false; }
+        }
+
+        private void StartCaptureFromConfig(ColorProfile recoveryProfile = null)
         {
             // L'ancienne session ne doit pas rester dans le replay après un reload.
             _clipRecorder.Stop();
@@ -415,8 +518,8 @@ namespace Broadcaster
 
                 if (videoDevice == null)
                 {
-                    MessageBox.Show(this, Localization.T("Le périphérique vidéo configuré est introuvable. Ouvre les options pour en choisir un autre."),
-                        "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    OpenOptionsAfterCaptureFailure(Localization.T(
+                        "Le périphérique vidéo configuré est introuvable. Ouvre les options pour en choisir un autre."));
                     return;
                 }
 
@@ -434,7 +537,22 @@ namespace Broadcaster
                         .Find(d => d.FriendlyName == _config.AudioCaptureDeviceName);
                 }
 
-                _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle, _config.Width, _config.Height);
+                var activeProfile = recoveryProfile ?? DeviceColorProfileStore.Load(_config.VideoSymbolicLink)?.ActiveProfile;
+                try
+                {
+                    _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle,
+                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync);
+                }
+                catch (Exception)
+                {
+                    // Mode manuel indisponible/refusé : un SEUL nouvel essai en Auto.
+                    // Ne pas relancer en boucle si Auto échoue également.
+                    if (!TrySwitchActiveFormatToAuto(out ColorProfile automaticProfile)) throw;
+                    activeProfile = automaticProfile;
+                    _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle,
+                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync);
+                }
+                _unrecoverableErrorShown = false;
                 _capture.SetVolume(_config.Volume);
 
                 // Lancer le tampon SANS attendre SessionStarted : le callback n'est
@@ -457,9 +575,108 @@ namespace Broadcaster
             }
             catch (Exception ex)
             {
-                MessageBox.Show(this, Localization.F("Impossible de démarrer la capture : {0}", ex.Message),
-                    "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                OpenOptionsAfterCaptureFailure(Localization.F(
+                    "Impossible de démarrer la capture : {0}", ex.Message));
             }
+        }
+
+        // L'overlay est volontairement une petite fenêtre transparente aux clics,
+        // possédée par ce formulaire, pour passer AU-DESSUS du rendu natif D3D11/EVR.
+        private void ApplyDebugOverlaySetting()
+        {
+            if (_config == null || !_config.ShowDebugOverlay)
+            {
+                _debugRefreshTimer.Stop();
+                _debugOverlay?.Close();
+                _debugOverlay?.Dispose();
+                _debugOverlay = null;
+                _debugMonitor?.Dispose();
+                _debugMonitor = null;
+                return;
+            }
+
+            if (_debugOverlay == null)
+            {
+                _debugOverlay = new DebugPerformanceOverlay();
+                _debugMonitor = new ProcessPerformanceMonitor();
+                _debugMonitor.Start();
+                _lastReceivedSamples = -1;
+                _lastPresentedSamples = -1;
+                _debugFpsClock.Restart();
+                if (!_isOptionsOpen) _debugOverlay.Show(this);
+            }
+            PositionDebugOverlay();
+            _debugRefreshTimer.Start();
+            RefreshDebugOverlay();
+        }
+
+        private void PositionDebugOverlay()
+        {
+            if (_debugOverlay == null || _debugOverlay.IsDisposed || !_renderSurface.IsHandleCreated)
+                return;
+            bool show = !_isOptionsOpen && WindowState != FormWindowState.Minimized && Visible;
+            if (!show) { _debugOverlay.Hide(); return; }
+            // Bandeau sur toute la largeur, au bord supérieur de la vidéo,
+            // quelle que soit la résolution ou la taille de la fenêtre Windows.
+            Rectangle surfaceBounds = _renderSurface.RectangleToScreen(_renderSurface.ClientRectangle);
+            if (surfaceBounds.Width < 1 || surfaceBounds.Height < 1)
+            {
+                _debugOverlay.Hide();
+                return;
+            }
+            var bounds = new Rectangle(surfaceBounds.Left, surfaceBounds.Top,
+                surfaceBounds.Width, Math.Min(DebugPerformanceOverlay.BandHeight, surfaceBounds.Height));
+            if (_debugOverlay.Bounds != bounds) _debugOverlay.Bounds = bounds;
+            if (!_debugOverlay.Visible) _debugOverlay.Show(this);
+        }
+
+        private void RefreshDebugOverlay()
+        {
+            if (_debugOverlay == null || _debugOverlay.IsDisposed) return;
+            PositionDebugOverlay();
+            long received = _capture.ReceivedVideoSamples;
+            long presented = _capture.PresentedVideoSamples;
+            double elapsed = _debugFpsClock.Elapsed.TotalSeconds;
+            bool measurable = received >= 0 && presented >= 0;
+            double fpsReceived = 0, fpsPresented = 0;
+            if (elapsed > 0.3 && measurable && _lastReceivedSamples >= 0 && _lastPresentedSamples >= 0)
+            {
+                // Un rechargement de session repart de zéro : pas de FPS négatifs.
+                fpsReceived = Math.Max(0, received - (received < _lastReceivedSamples ? 0 : _lastReceivedSamples)) / elapsed;
+                fpsPresented = Math.Max(0, presented - (presented < _lastPresentedSamples ? 0 : _lastPresentedSamples)) / elapsed;
+            }
+            _lastReceivedSamples = received;
+            _lastPresentedSamples = presented;
+            _debugFpsClock.Restart();
+
+            var stats = _debugMonitor?.Latest;
+            var mode = _capture.ActiveVideoMode;
+            string cpu = stats != null && stats.CpuPercent >= 0 ?
+                stats.CpuPercent.ToString("0.0", CultureInfo.InvariantCulture) + " %" : Localization.T("n/d");
+            string gpu = stats != null && stats.GpuEnginePercent >= 0 ?
+                stats.GpuEnginePercent.ToString("0.0", CultureInfo.InvariantCulture) + " %" : Localization.T("n/d");
+            string format = mode == null ? Localization.T("Aucune source") : mode.Description;
+            string receivedText = !measurable ? Localization.T("n/d (EVR)") :
+                fpsReceived.ToString("0.0", CultureInfo.InvariantCulture) + " FPS";
+            string presentedText = !measurable ? Localization.T("n/d (EVR)") :
+                fpsPresented.ToString("0.0", CultureInfo.InvariantCulture) + " FPS";
+            string bitrate = Localization.T("n/d");
+            if (mode != null)
+            {
+                double bpp = mode.Format == "NV12" ? 1.5 : mode.Format == "P010" ? 3.0 :
+                    mode.Format == "YUY2" || mode.Format == "UYVY" ? 2.0 :
+                    mode.Format == "RGB32" ? 4.0 : 0;
+                if (bpp > 0)
+                {
+                    // Estimation sans overhead USB/PCIe ni blanking HDMI :
+                    // en DX11 basée sur les frames reçues, sinon sur le mode négocié.
+                    double rate = measurable ? fpsReceived : mode.Fps;
+                    double gbps = mode.Width * (double)mode.Height * bpp * rate * 8 / 1e9;
+                    bitrate = "~" + gbps.ToString("0.00", CultureInfo.InvariantCulture) + Localization.T(" Gb/s brut");
+                }
+                else bitrate = Localization.T("n/d (compressé)");
+            }
+            _debugOverlay.SetMetrics(cpu, gpu, receivedText, presentedText, bitrate, format);
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -472,6 +689,11 @@ namespace Broadcaster
                 e.Cancel = true;
                 return;
             }
+            _debugRefreshTimer.Stop();
+            _debugRefreshTimer.Dispose();
+            _debugOverlay?.Close();
+            _debugOverlay?.Dispose();
+            _debugMonitor?.Dispose();
             Application.RemoveMessageFilter(this);
             _clipRegionTimer.Stop();
             _clipRegionTimer.Dispose();
