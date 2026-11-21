@@ -23,6 +23,9 @@ namespace Broadcaster
         public int CaptureTargetFps { get; set; } = 0;
         public bool PreviewVsync { get; set; } = false; // can cap preview to monitor refresh
         public bool ShowDebugOverlay { get; set; } = false; // Extras : panneau diagnostic désactivé par défaut
+        public bool PreventSleepWhileCapturing { get; set; } = true;
+        // Off / X2. Preview interpolation does not change the HDMI capture FPS.
+        public string FrameInterpolation { get; set; } = "Off";
 
         public string DisplayDeviceName { get; set; } = "";
         public KeyBindings Bindings { get; set; } = new KeyBindings();
@@ -74,6 +77,10 @@ namespace Broadcaster
                     config.PreviewVsync = vsync;
                 if (values.TryGetValue("ShowDebugOverlay", out var overlayValue) && bool.TryParse(overlayValue, out var overlay))
                     config.ShowDebugOverlay = overlay;
+                if (values.TryGetValue("PreventSleepWhileCapturing", out var awakeValue) && bool.TryParse(awakeValue, out var awake))
+                    config.PreventSleepWhileCapturing = awake;
+                if (values.TryGetValue("FrameInterpolation", out var interpolation))
+                    config.FrameInterpolation = string.Equals(interpolation, "X2", StringComparison.OrdinalIgnoreCase) ? "X2" : "Off";
                 if (values.TryGetValue("DisplayDeviceName", out var dn)) config.DisplayDeviceName = dn;
                 if (values.TryGetValue("NoSignalDetectionEnabled", out var nsd) && bool.TryParse(nsd, out var _nsd)) config.NoSignalDetectionEnabled = _nsd;
 
@@ -141,6 +148,8 @@ namespace Broadcaster
                     $"CaptureTargetFps={CaptureTargetFps}",
                     $"PreviewVsync={PreviewVsync}",
                     $"ShowDebugOverlay={ShowDebugOverlay}",
+                    $"PreventSleepWhileCapturing={PreventSleepWhileCapturing}",
+                    $"FrameInterpolation={FrameInterpolation}",
                     $"DisplayDeviceName={DisplayDeviceName}",
                     $"NoSignalDetectionEnabled={NoSignalDetectionEnabled}",
                     $"Key_OpenMenu={Bindings.OpenMenu}",

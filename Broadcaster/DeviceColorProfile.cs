@@ -19,6 +19,10 @@ namespace Broadcaster
 
         // Les traitements vidéo appartiennent au profil du périphérique et jamais au
         // profil "Par défaut". Une ancienne configuration JSON charge les valeurs neutres.
+        // Master bypass for GPU post-processing. Defaults to true so existing JSON
+        // profiles keep their previous image quality without migration.
+        // Does not disable YUV conversion, DX11 presentation, or capture format selection.
+        public bool GpuEnhancementsEnabled { get; set; } = true;
         public bool SharpenEnabled { get; set; } = false;
         public int SharpenAmount { get; set; } = 30; // -100 à 100 : flou / neutre / sharpen GPU
         // Off / FXAA / SMAA. Neutre pour les profils existants (rétrocompatible JSON).
@@ -45,6 +49,7 @@ namespace Broadcaster
             Contrast = Contrast,
             Hue = Hue,
             Saturation = Saturation,
+            GpuEnhancementsEnabled = GpuEnhancementsEnabled,
             SharpenEnabled = SharpenEnabled,
             SharpenAmount = SharpenAmount,
             AntiAliasingMode = AntiAliasingMode,

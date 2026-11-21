@@ -21,6 +21,15 @@ namespace Broadcaster
             {
                 ["en"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
+                    ["Empêcher la mise en veille pendant la capture"] = "Prevent sleep while capturing",
+                    ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU ×2 interpolation (experimental, 120 Hz display recommended)",
+                    ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Creates an intermediate frame between two HDMI frames. May add latency and artifacts; does not increase capture card FPS. Uses DirectX 11.",
+                    ["FPS générés "] = "Generated FPS ",
+
+                    ["Post-traitement GPU"] = "GPU post-processing",
+                    ["Améliorations GPU : activées"] = "GPU enhancements: enabled",
+                    ["Améliorations GPU : désactivées"] = "GPU enhancements: disabled",
+                    ["Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active)."] = "Bypass filters without erasing settings (video conversion stays active).",
                     ["Ouvre les options pour choisir un autre mode ou périphérique."] = "Open settings to choose another mode or device.",
                     ["Le pilote a signalé une erreur de lecture du flux vidéo."] = "The driver reported a video stream read error.",
                     ["Le flux vidéo s'est terminé pendant la capture."] = "The video stream ended during capture.",
@@ -122,6 +131,15 @@ namespace Broadcaster
                 },
                 ["es"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
+                    ["Empêcher la mise en veille pendant la capture"] = "Evitar suspensión durante la captura",
+                    ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "Interpolación GPU ×2 (experimental, se recomienda pantalla de 120 Hz)",
+                    ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Genera un fotograma intermedio entre dos fotogramas HDMI. Puede añadir latencia y artefactos; no aumenta los FPS de captura. Usa DirectX 11.",
+                    ["FPS générés "] = "FPS generados ",
+
+                    ["Post-traitement GPU"] = "Posprocesado GPU",
+                    ["Améliorations GPU : activées"] = "Mejoras GPU: activadas",
+                    ["Améliorations GPU : désactivées"] = "Mejoras GPU: desactivadas",
+                    ["Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active)."] = "Desactiva filtros sin borrar sus ajustes (la conversión de vídeo sigue activa).",
                     ["Ouvre les options pour choisir un autre mode ou périphérique."] = "Abre los ajustes para elegir otro modo o dispositivo.",
                     ["Le pilote a signalé une erreur de lecture du flux vidéo."] = "El controlador informó de un error de lectura del vídeo.",
                     ["Le flux vidéo s'est terminé pendant la capture."] = "El flujo de vídeo terminó durante la captura.",
@@ -223,6 +241,15 @@ namespace Broadcaster
                 },
                 ["de"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
+                    ["Empêcher la mise en veille pendant la capture"] = "Ruhezustand während der Aufnahme verhindern",
+                    ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU-Interpolation ×2 (experimentell, 120-Hz-Monitor empfohlen)",
+                    ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Erzeugt ein Zwischenbild zwischen zwei HDMI-Bildern. Kann Latenz und Artefakte verursachen; erhöht nicht die Aufnahme-FPS. Verwendet DirectX 11.",
+                    ["FPS générés "] = "Generierte FPS ",
+
+                    ["Post-traitement GPU"] = "GPU-Nachbearbeitung",
+                    ["Améliorations GPU : activées"] = "GPU-Verbesserungen: aktiviert",
+                    ["Améliorations GPU : désactivées"] = "GPU-Verbesserungen: deaktiviert",
+                    ["Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active)."] = "Filter ohne Verlust der Einstellungen ausschalten (Videokonvertierung bleibt aktiv).",
                     ["Ouvre les options pour choisir un autre mode ou périphérique."] = "Öffne die Einstellungen, um einen anderen Modus oder ein anderes Gerät auszuwählen.",
                     ["Le pilote a signalé une erreur de lecture du flux vidéo."] = "Der Treiber meldete einen Fehler beim Lesen des Videostreams.",
                     ["Le flux vidéo s'est terminé pendant la capture."] = "Der Videostream wurde während der Aufnahme beendet.",
@@ -324,6 +351,15 @@ namespace Broadcaster
                 },
                 ["nb"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
+                    ["Empêcher la mise en veille pendant la capture"] = "Hindre hvilemodus under opptak",
+                    ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU-interpolering ×2 (eksperimentell, 120 Hz-skjerm anbefales)",
+                    ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Lager et mellomliggende bilde mellom to HDMI-bilder. Kan øke forsinkelse og gi artefakter; øker ikke opptakskortets FPS. Bruker DirectX 11.",
+                    ["FPS générés "] = "Genererte FPS ",
+
+                    ["Post-traitement GPU"] = "GPU-etterbehandling",
+                    ["Améliorations GPU : activées"] = "GPU-forbedringer: på",
+                    ["Améliorations GPU : désactivées"] = "GPU-forbedringer: av",
+                    ["Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active)."] = "Slår av filtrene uten å slette innstillingene (videokonvertering forblir aktiv).",
                     ["Ouvre les options pour choisir un autre mode ou périphérique."] = "Åpne innstillingene for å velge en annen modus eller enhet.",
                     ["Le pilote a signalé une erreur de lecture du flux vidéo."] = "Driveren rapporterte en feil ved lesing av videostrømmen.",
                     ["Le flux vidéo s'est terminé pendant la capture."] = "Videostrømmen ble avsluttet under opptak.",
@@ -425,6 +461,15 @@ namespace Broadcaster
                 },
                 ["sv"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
+                    ["Empêcher la mise en veille pendant la capture"] = "Förhindra viloläge under inspelning",
+                    ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU-interpolering ×2 (experimentell, 120 Hz-skärm rekommenderas)",
+                    ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Skapar en mellanbild mellan två HDMI-bilder. Kan öka fördröjningen och ge artefakter; höjer inte inspelningskortets FPS. Använder DirectX 11.",
+                    ["FPS générés "] = "Genererade FPS ",
+
+                    ["Post-traitement GPU"] = "GPU-efterbehandling",
+                    ["Améliorations GPU : activées"] = "GPU-förbättringar: på",
+                    ["Améliorations GPU : désactivées"] = "GPU-förbättringar: av",
+                    ["Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active)."] = "Stänger av filtren utan att radera inställningarna (videokonvertering förblir aktiv).",
                     ["Ouvre les options pour choisir un autre mode ou périphérique."] = "Öppna inställningarna för att välja ett annat läge eller en annan enhet.",
                     ["Le pilote a signalé une erreur de lecture du flux vidéo."] = "Drivrutinen rapporterade ett läsfel i videoströmmen.",
                     ["Le flux vidéo s'est terminé pendant la capture."] = "Videoströmmen avslutades under inspelningen.",
@@ -526,6 +571,15 @@ namespace Broadcaster
                 },
                 ["it"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
+                    ["Empêcher la mise en veille pendant la capture"] = "Impedisci la sospensione durante la cattura",
+                    ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "Interpolazione GPU ×2 (sperimentale, consigliato schermo a 120 Hz)",
+                    ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Genera un fotogramma intermedio tra due fotogrammi HDMI. Può aumentare latenza e artefatti; non aumenta gli FPS della scheda. Usa DirectX 11.",
+                    ["FPS générés "] = "FPS generati ",
+
+                    ["Post-traitement GPU"] = "Post-elaborazione GPU",
+                    ["Améliorations GPU : activées"] = "Miglioramenti GPU: attivi",
+                    ["Améliorations GPU : désactivées"] = "Miglioramenti GPU: disattivi",
+                    ["Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active)."] = "Disattiva i filtri senza cancellare le impostazioni (la conversione video resta attiva).",
                     ["Ouvre les options pour choisir un autre mode ou périphérique."] = "Apri le impostazioni per scegliere un’altra modalità o dispositivo.",
                     ["Le pilote a signalé une erreur de lecture du flux vidéo."] = "Il driver ha segnalato un errore di lettura del flusso video.",
                     ["Le flux vidéo s'est terminé pendant la capture."] = "Il flusso video è terminato durante l’acquisizione.",
@@ -627,6 +681,15 @@ namespace Broadcaster
                 },
                 ["pt"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
+                    ["Empêcher la mise en veille pendant la capture"] = "Impedir suspensão durante a captura",
+                    ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "Interpolação GPU ×2 (experimental, ecrã de 120 Hz recomendado)",
+                    ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Gera um fotograma intermédio entre dois fotogramas HDMI. Pode aumentar latência e artefactos; não aumenta os FPS da placa. Usa DirectX 11.",
+                    ["FPS générés "] = "FPS gerados ",
+
+                    ["Post-traitement GPU"] = "Pós-processamento GPU",
+                    ["Améliorations GPU : activées"] = "Melhorias GPU: ativadas",
+                    ["Améliorations GPU : désactivées"] = "Melhorias GPU: desativadas",
+                    ["Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active)."] = "Desativa os filtros sem apagar as definições (a conversão de vídeo continua ativa).",
                     ["Ouvre les options pour choisir un autre mode ou périphérique."] = "Abre as definições para escolher outro modo ou dispositivo.",
                     ["Le pilote a signalé une erreur de lecture du flux vidéo."] = "O controlador comunicou um erro de leitura do fluxo de vídeo.",
                     ["Le flux vidéo s'est terminé pendant la capture."] = "O fluxo de vídeo terminou durante a captura.",

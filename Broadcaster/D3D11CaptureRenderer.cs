@@ -40,6 +40,15 @@ namespace Broadcaster
         private readonly ColorProfile _profile;
         private readonly double _requestedSourceFps;
         private readonly bool _previewVsync;
+        private readonly bool _interpolateFrames;
+        private Texture2D _interpPrevious, _interpCurrent;
+        private ShaderResourceView _interpPreviousSrv, _interpCurrentSrv;
+        private PixelShader _interpShader, _interpCopyShader;
+        private bool _hasPreviousFrame;
+        private bool _interpolationSuspended;
+        private int _slowInterpolationFrames;
+        private long _generatedSamples;
+        public long GeneratedSamples => Interlocked.Read(ref _generatedSamples);
         // When the user requests a pixel format explicitly, SourceReader is not
         // allowed to renegotiate a different native format without an error.
         private readonly string _forcedNativeFormat;
@@ -68,6 +77,7 @@ namespace Broadcaster
         private RenderTargetView _aaRtv, _edgeRtv, _weightRtv;
         private ShaderResourceView _aaSrv, _edgeSrv, _weightSrv;
         // L'anti-aliasing ne modifie ni les FPS négociés ni le flux capturé.
+        private readonly bool _gpuEnhancementsEnabled;
         private readonly string _antiAliasingMode;
         private readonly int _chromaMode; // 0 = standard, 1 = bicubic, 2 = adaptatif
         private readonly float _debandAmount; // 0..1, zéro = aucun traitement GPU supplémentaire
@@ -306,6 +316,43 @@ namespace Broadcaster
         // SMAA: variante spatiale morphologique à 3 passes (détection des bords,
         // recherche/poids locaux, fusion), sans les LUT Area/Search du SMAA de référence.
         // Aucun historique d'images n'est utilisé : latence limitée à la trame actuelle.
+        // Experimental spatial block-matching interpolation. Not an AI or optical-flow SDK.
+        // Work entirely in RGB GPU textures; uncertain motion falls back to a blend.
+        private const string InterpolationHlsl = @"
+            Texture2D<float4> EarlierFrame : register(t4);
+            Texture2D<float4> LaterFrame : register(t5);
+            float LumaInterp(float3 c) { return dot(c, float3(0.2126,0.7152,0.0722)); }
+            float4 IntermediatePS(VertexOut input) : SV_Target
+            {
+                float2 uv = input.uv;
+                float2 pixel = 1.0 / Dimensions.zw;
+                float3 prev = EarlierFrame.SampleLevel(LinearSample, uv, 0).rgb;
+                float3 next = LaterFrame.SampleLevel(LinearSample, uv, 0).rgb;
+                float3 baseBlend = (prev + next) * 0.5;
+                float best = 100.0;
+                float2 motion = float2(0,0);
+                float prevLuma = LumaInterp(prev);
+                [unroll] for (int y = -1; y <= 1; ++y)
+                {
+                    [unroll] for (int x = -1; x <= 1; ++x)
+                    {
+                        float2 v = float2(x,y) * pixel * 2.0;
+                        float3 sampleC = LaterFrame.SampleLevel(LinearSample, uv+v, 0).rgb;
+                        float err = abs(prevLuma - LumaInterp(sampleC)) +
+                                    0.08*(abs(v.x/pixel.x)+abs(v.y/pixel.y))/4.0;
+                        if (err < best) { best = err; motion = v; }
+                    }
+                }
+                float3 earlier = EarlierFrame.SampleLevel(LinearSample, uv-motion*0.5, 0).rgb;
+                float3 later = LaterFrame.SampleLevel(LinearSample, uv+motion*0.5, 0).rgb;
+                float confidence = saturate((0.15 - best) * 8.0);
+                return float4(saturate(lerp(baseBlend,(earlier+later)*0.5,confidence)),1);
+            }
+            float4 CopyCurrentPS(VertexOut input) : SV_Target
+            {
+                return LaterFrame.SampleLevel(LinearSample, input.uv, 0);
+            }";
+
         private const string AntiAliasingHlsl = @"
             float LumaAA(float3 v) { return dot(v, float3(0.299, 0.587, 0.114)); }
             float3 SampleRgbAA(float2 uv) { return Converted.SampleLevel(LinearSample, uv, 0).rgb; }
@@ -430,7 +477,7 @@ namespace Broadcaster
                 return float4(saturate(mixColor),1);
             }";
 
-        public D3D11CaptureRenderer(MediaSource source, IntPtr hwnd, ColorProfile profile, double sourceFps, bool previewVsync,
+        public D3D11CaptureRenderer(MediaSource source, IntPtr hwnd, ColorProfile profile, double sourceFps, bool previewVsync, bool interpolateFrames,
             Action onReady, Action<string> onError)
         {
             _source = source ?? throw new ArgumentNullException(nameof(source));
@@ -439,13 +486,18 @@ namespace Broadcaster
             _forcedNativeFormat = string.IsNullOrWhiteSpace(profile.SourceFormat) ||
                 string.Equals(profile.SourceFormat, "Auto", StringComparison.OrdinalIgnoreCase)
                 ? null : profile.SourceFormat.Trim();
-            _antiAliasingMode = string.Equals(profile.AntiAliasingMode, "FXAA", StringComparison.OrdinalIgnoreCase) ? "FXAA" :
+            _gpuEnhancementsEnabled = profile.GpuEnhancementsEnabled;
+            _antiAliasingMode = !_gpuEnhancementsEnabled ? "Off" :
+                string.Equals(profile.AntiAliasingMode, "FXAA", StringComparison.OrdinalIgnoreCase) ? "FXAA" :
                 string.Equals(profile.AntiAliasingMode, "SMAA", StringComparison.OrdinalIgnoreCase) ? "SMAA" : "Off";
-            _chromaMode = string.Equals(profile.ChromaUpsamplingMode, "Bicubic", StringComparison.OrdinalIgnoreCase) ? 1 :
+            _chromaMode = !_gpuEnhancementsEnabled ? 0 :
+                string.Equals(profile.ChromaUpsamplingMode, "Bicubic", StringComparison.OrdinalIgnoreCase) ? 1 :
                 string.Equals(profile.ChromaUpsamplingMode, "Adaptive", StringComparison.OrdinalIgnoreCase) ? 2 : 0;
-            _debandAmount = profile.DebandEnabled ? Math.Max(0, Math.Min(100, profile.DebandStrength)) / 100f : 0f;
+            _debandAmount = _gpuEnhancementsEnabled && profile.DebandEnabled ?
+                Math.Max(0, Math.Min(100, profile.DebandStrength)) / 100f : 0f;
             _requestedSourceFps = sourceFps > 0 && sourceFps <= 1000 ? sourceFps : 60.0;
             _previewVsync = previewVsync;
+            _interpolateFrames = interpolateFrames;
             _onReady = onReady;
             _onError = onError;
         }
@@ -503,8 +555,23 @@ namespace Broadcaster
                         Interlocked.Increment(ref _receivedSamples);
                         ResizeSwapChainIfNecessary();
                         UploadSample(sample);
-                        Draw();
-                        Interlocked.Increment(ref _presentedSamples);
+                        long drawStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                        int displayed = Draw();
+                        Interlocked.Add(ref _presentedSamples, displayed);
+                        if (_interpolateFrames && displayed > 1)
+                        {
+                            double drawMs = (System.Diagnostics.Stopwatch.GetTimestamp() - drawStart) *
+                                1000.0 / System.Diagnostics.Stopwatch.Frequency;
+                            // Do not sacrifice the incoming HDMI rate just to generate
+                            // synthetic frames. Disable ×2 for this session after
+                            // repeated over-budget presents, keeping native preview.
+                            if (drawMs > 1350.0 / _requestedSourceFps)
+                                _slowInterpolationFrames++;
+                            else
+                                _slowInterpolationFrames = 0;
+                            if (_slowInterpolationFrames >= 4)
+                                _interpolationSuspended = true;
+                        }
                         framesInWindow++;
                         if (fpsClock.ElapsedMilliseconds >= 2000)
                         {
@@ -659,6 +726,7 @@ namespace Broadcaster
             });
             _convertedRtv = new RenderTargetView(_device, _convertedTexture);
             _convertedSrv = new ShaderResourceView(_device, _convertedTexture);
+            if (_interpolateFrames) CreateInterpolationTargets();
 
             // Textures supplémentaires créées UNIQUEMENT si un filtre est sélectionné.
             // En Off, aucun coût GPU/mémoire supplémentaire par rapport au moteur YUY2 stable.
@@ -678,6 +746,15 @@ namespace Broadcaster
                 _convertShader = new PixelShader(_device, conversionCode);
             using (var pixelCode = ShaderBytecode.Compile(Hlsl, "PS", "ps_4_0").Bytecode)
                 _pixelShader = new PixelShader(_device, pixelCode);
+            if (_interpolateFrames)
+            {
+                using (var code = ShaderBytecode.Compile(Hlsl + "\n" + InterpolationHlsl,
+                    "IntermediatePS", "ps_4_0").Bytecode)
+                    _interpShader = new PixelShader(_device, code);
+                using (var code = ShaderBytecode.Compile(Hlsl + "\n" + InterpolationHlsl,
+                    "CopyCurrentPS", "ps_4_0").Bytecode)
+                    _interpCopyShader = new PixelShader(_device, code);
+            }
             if (_antiAliasingMode != "Off")
             {
                 string aaSource = Hlsl + "\n" + AntiAliasingHlsl;
@@ -713,6 +790,36 @@ namespace Broadcaster
             });
         }
 
+        private void CreateInterpolationTargets()
+        {
+            _interpPrevious = CreateInterpolationTexture();
+            _interpCurrent = CreateInterpolationTexture();
+            _interpPreviousSrv = new ShaderResourceView(_device, _interpPrevious);
+            _interpCurrentSrv = new ShaderResourceView(_device, _interpCurrent);
+            _hasPreviousFrame = false;
+        }
+
+        private Texture2D CreateInterpolationTexture()
+        {
+            return new Texture2D(_device, new Texture2DDescription
+            {
+                Width = _surfaceWidth, Height = _surfaceHeight,
+                ArraySize = 1, MipLevels = 1, Format = DxgiFormat.B8G8R8A8_UNorm,
+                Usage = D3DResourceUsage.Default, BindFlags = BindFlags.ShaderResource,
+                CpuAccessFlags = CpuAccessFlags.None,
+                SampleDescription = new SampleDescription(1, 0)
+            });
+        }
+
+        private void ReleaseInterpolationTargets()
+        {
+            _interpPreviousSrv?.Dispose(); _interpPreviousSrv = null;
+            _interpCurrentSrv?.Dispose(); _interpCurrentSrv = null;
+            _interpPrevious?.Dispose(); _interpPrevious = null;
+            _interpCurrent?.Dispose(); _interpCurrent = null;
+            _hasPreviousFrame = false;
+        }
+
         private void CreateFilterTarget(out Texture2D texture, out RenderTargetView target, out ShaderResourceView view)
         {
             texture = new Texture2D(_device, new Texture2DDescription
@@ -740,9 +847,11 @@ namespace Broadcaster
             _device.ImmediateContext.OutputMerger.SetTargets((RenderTargetView)null);
             _rtv.Dispose();
             _rtv = null;
+            ReleaseInterpolationTargets();
             _swapChain.ResizeBuffers(2, w, h, DxgiFormat.B8G8R8A8_UNorm, SwapChainFlags.None);
             _surfaceWidth = w; _surfaceHeight = h;
             CreateRenderTarget();
+            if (_interpolateFrames) CreateInterpolationTargets();
         }
 
         private void UploadSample(Sample sample)
@@ -847,13 +956,13 @@ namespace Broadcaster
             public Vector4 PostOptions;
         }
 
-        private void Draw()
+        private int Draw()
         {
             var context = _device.ImmediateContext;
             var options = new ShaderConstants
             {
                 Dimensions = new Vector4(_sourceWidth, _sourceHeight, _surfaceWidth, _surfaceHeight),
-                Settings = new Vector4(_profile.SharpenEnabled ?
+                Settings = new Vector4(_gpuEnhancementsEnabled && _profile.SharpenEnabled ?
                     (_profile.SharpenAmount >= 0
                         ? Math.Min(100, _profile.SharpenAmount) / 65f
                         : Math.Max(-100, _profile.SharpenAmount) / 100f) : 0f,
@@ -868,8 +977,8 @@ namespace Broadcaster
 
             // Unscaled, zero-sharpen frames can be decoded directly into the
             // backbuffer: one GPU render pass instead of two (especially 4K).
-            bool noSharpen = !_profile.SharpenEnabled || _profile.SharpenAmount == 0;
-            bool directConversion = _antiAliasingMode == "Off" && noSharpen && _debandAmount == 0f &&
+            bool noSharpen = !_gpuEnhancementsEnabled || !_profile.SharpenEnabled || _profile.SharpenAmount == 0;
+            bool directConversion = (!_interpolateFrames || _interpolationSuspended) && _antiAliasingMode == "Off" && noSharpen && _debandAmount == 0f &&
                                     _sourceWidth == _surfaceWidth && _sourceHeight == _surfaceHeight;
             if (directConversion)
             {
@@ -880,7 +989,7 @@ namespace Broadcaster
                 context.Draw(3, 0);
                 context.PixelShader.SetShaderResource(0, null);
                 _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
-                return;
+                return 1;
             }
 
             // Étape 1 : décodage YUY2/NV12/UYVY en RGB, une fois par pixel.
@@ -893,7 +1002,7 @@ namespace Broadcaster
 
             // Passe AA facultative, avant le sharpen. Lorsque la netteté est
             // coupée et qu'il n'y a pas de redimensionnement, AA -> backbuffer.
-            bool aaDirect = _antiAliasingMode != "Off" && noSharpen && _debandAmount == 0f &&
+            bool aaDirect = (!_interpolateFrames || _interpolationSuspended) && _antiAliasingMode != "Off" && noSharpen && _debandAmount == 0f &&
                             _sourceWidth == _surfaceWidth && _sourceHeight == _surfaceHeight;
             if (_antiAliasingMode == "FXAA")
             {
@@ -932,7 +1041,7 @@ namespace Broadcaster
             if (aaDirect)
             {
                 _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
-                return;
+                return 1;
             }
 
             // Dernière passe : échantillonnage/affichage, sharpen facultatif.
@@ -943,12 +1052,78 @@ namespace Broadcaster
             context.PixelShader.SetShaderResource(1, _antiAliasingMode == "Off" ? _convertedSrv : _aaSrv);
             context.Draw(3, 0);
             context.PixelShader.SetShaderResource(1, null);
-            _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
+            return PresentWithOptionalInterpolation();
+        }
+
+        private int PresentWithOptionalInterpolation()
+        {
+            if (!_interpolateFrames || _interpolationSuspended)
+            {
+                _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
+                return 1;
+            }
+
+            var context = _device.ImmediateContext;
+            // The final post-processed frame is in the swapchain backbuffer.
+            // A GPU copy keeps two RGB frames without any CPU readback.
+            context.OutputMerger.SetTargets((RenderTargetView)null);
+            using (var backBuffer = _swapChain.GetBackBuffer<Texture2D>(0))
+            {
+                context.CopyResource(backBuffer, _interpCurrent);
+                int count = 1;
+                if (_hasPreviousFrame && _running)
+                {
+                    context.OutputMerger.SetTargets(_rtv);
+                    context.Rasterizer.SetViewport(0, 0, _surfaceWidth, _surfaceHeight);
+                    context.PixelShader.Set(_interpShader);
+                    context.PixelShader.SetShaderResource(4, _interpPreviousSrv);
+                    context.PixelShader.SetShaderResource(5, _interpCurrentSrv);
+                    context.Draw(3, 0);
+                    context.PixelShader.SetShaderResource(4, null);
+                    context.PixelShader.SetShaderResource(5, null);
+                    // Presentation may be paced by V-Sync (recommended on 120Hz+).
+                    long midpointTick = System.Diagnostics.Stopwatch.GetTimestamp();
+                    _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
+                    Interlocked.Increment(ref _generatedSamples);
+                    count++;
+                    // Without V-Sync, space the two images across one HDMI frame
+                    // instead of presenting both in a burst (which would show no
+                    // actual 120-Hz benefit). Costs up to half a frame of latency.
+                    if (!_previewVsync)
+                    {
+                        double halfFrameMs = Math.Min(12.5, 500.0 / _requestedSourceFps);
+                        while (_running &&
+                               (System.Diagnostics.Stopwatch.GetTimestamp() - midpointTick) *
+                                   1000.0 / System.Diagnostics.Stopwatch.Frequency < halfFrameMs - 0.5)
+                            Thread.Sleep(1);
+                    }
+                    // Draw the true current frame after the synthesized midpoint.
+                    // Do not write a backbuffer resource acquired before Present().
+                    context.OutputMerger.SetTargets(_rtv);
+                    context.PixelShader.Set(_interpCopyShader);
+                    context.PixelShader.SetShaderResource(5, _interpCurrentSrv);
+                    context.Draw(3, 0);
+                    context.PixelShader.SetShaderResource(5, null);
+                }
+                _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
+                // Recycle textures/views, not an extra 1080p/4K GPU copy.
+                var tmpTex = _interpPrevious;
+                _interpPrevious = _interpCurrent;
+                _interpCurrent = tmpTex;
+                var tmpSrv = _interpPreviousSrv;
+                _interpPreviousSrv = _interpCurrentSrv;
+                _interpCurrentSrv = tmpSrv;
+                _hasPreviousFrame = true;
+                return count;
+            }
         }
 
         private void DisposeGraphics()
         {
             _rtv?.Dispose(); _rtv = null;
+            ReleaseInterpolationTargets();
+            _interpShader?.Dispose(); _interpShader = null;
+            _interpCopyShader?.Dispose(); _interpCopyShader = null;
             _convertedRtv?.Dispose(); _convertedRtv = null;
             _convertedSrv?.Dispose(); _convertedSrv = null;
             _convertedTexture?.Dispose(); _convertedTexture = null;

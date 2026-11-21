@@ -42,6 +42,19 @@ namespace Broadcaster
         {
             Text = "Afficher la banderole de performances (CPU, GPU, FPS, débit)", AutoSize = true
         };
+        private readonly CheckBox _preventSleepCheck = new CheckBox
+        {
+            Text = "Empêcher la mise en veille pendant la capture", AutoSize = true
+        };
+        private readonly CheckBox _interpolationCheck = new CheckBox
+        {
+            Text = "Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)", AutoSize = true
+        };
+        private readonly Label _interpolationHint = new Label
+        {
+            Text = "Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11.",
+            ForeColor = Color.DimGray, AutoSize = true, MaximumSize = new Size(605, 0)
+        };
         private readonly Label _debugOverlayHint = new Label
         {
             Text = "Banderole discrète en haut de la fenêtre vidéo, sans effet sur le flux HDMI.\n" +
@@ -114,6 +127,17 @@ namespace Broadcaster
         private readonly ColorRow _saturationRow = new ColorRow { Property = VideoProcAmpProperty.Saturation };
 
         // --- Traitement GPU / qualité de la source, stockés par profil personnalisé ---
+        // A single master switch to bypass all optional GPU effects without
+        // resetting any of their saved per-profile settings.
+        private readonly CheckBox _gpuEnhancementsEnabled = new CheckBox
+        {
+            Appearance = Appearance.Button,
+            Text = "Améliorations GPU : activées",
+            TextAlign = ContentAlignment.MiddleCenter,
+            Width = 245,
+            Height = 30,
+            FlatStyle = FlatStyle.System
+        };
         private readonly CheckBox _sharpenEnabled = new CheckBox { Text = "Activer la netteté (DirectX 11 / masque flou)", AutoSize = true };
         private readonly TrackBar _sharpenAmount = new TrackBar { Minimum = -100, Maximum = 100, TickFrequency = 20, Width = 375 };
         private readonly Label _sharpenValue = new Label { AutoSize = true };
@@ -280,7 +304,7 @@ namespace Broadcaster
             var videoTab = new TabPage("Vidéo") { AutoScroll = true };
             tabs.TabPages.Add(generalTab);
             tabs.TabPages.Add(videoTab);
-            var extrasTab = new TabPage("Extras");
+            var extrasTab = new TabPage("Extras") { AutoScroll = true };
             tabs.TabPages.Add(extrasTab);
 
             BuildExtrasTab(extrasTab);
@@ -386,10 +410,16 @@ namespace Broadcaster
             _debugOverlayCheck.Location = new Point(15, 427);
             _debugOverlayCheck.Checked = _initialConfig.ShowDebugOverlay;
             _debugOverlayHint.Location = new Point(35, 455);
+            _preventSleepCheck.Location = new Point(15, 494);
+            _preventSleepCheck.Checked = _initialConfig.PreventSleepWhileCapturing;
+            _interpolationCheck.Location = new Point(15, 530);
+            _interpolationCheck.Checked = _initialConfig.FrameInterpolation == "X2";
+            _interpolationHint.Location = new Point(35, 560);
             page.Controls.AddRange(new Control[] {
                 _enableClipsCheck, _clipDurationLabel, _clipDurationInput,
                 _clipFpsLabel, _clipFpsCombo, _clipInfoLabel, _openClipsButton,
-                _debugOverlayCheck, _debugOverlayHint
+                _debugOverlayCheck, _debugOverlayHint,
+                _preventSleepCheck, _interpolationCheck, _interpolationHint
             });
             RefreshClipControls();
 
@@ -658,8 +688,25 @@ namespace Broadcaster
             BuildColorRow(page, _hueRow, "Teinte :", ref y);
             BuildColorRow(page, _saturationRow, "Saturation :", ref y);
 
-            // Les quatre curseurs de couleur finissent à y=240. Réglages vidéo juste dessous.
-            var gpuGroup = new GroupBox { Text = "Netteté / traitement DirectX 11", Location = new Point(12, 246), Size = new Size(635, 115) };
+            // Global GPU effect bypass: the underlying effects remain configured.
+            // It does not stop D3D11/YUV conversion or change the capture format.
+            var masterGpuGroup = new GroupBox
+            {
+                Text = "Post-traitement GPU",
+                Location = new Point(12, 246), Size = new Size(635, 72)
+            };
+            _gpuEnhancementsEnabled.Location = new Point(14, 24);
+            _gpuEnhancementsEnabled.CheckedChanged += (s, e) => RefreshVideoEditors();
+            masterGpuGroup.Controls.Add(_gpuEnhancementsEnabled);
+            masterGpuGroup.Controls.Add(new Label
+            {
+                Text = "Coupe les filtres sans effacer leurs réglages (la conversion vidéo reste active).",
+                AutoSize = true, MaximumSize = new Size(350, 0),
+                Location = new Point(272, 23), ForeColor = Color.DimGray
+            });
+            page.Controls.Add(masterGpuGroup);
+
+            var gpuGroup = new GroupBox { Text = "Netteté / traitement DirectX 11", Location = new Point(12, 323), Size = new Size(635, 115) };
             _sharpenEnabled.Location = new Point(14, 25);
             var sharpenLabel = new Label { Text = "Douceur / netteté :", AutoSize = true, Location = new Point(14, 73) };
             _sharpenAmount.Location = new Point(165, 54);
@@ -671,7 +718,7 @@ namespace Broadcaster
 
             // Anti-aliasing écran, après conversion YUV -> RGB, avant sharpen.
             // Ce choix n'affecte PAS le format ou la fréquence des samples HDMI.
-            var aaGroup = new GroupBox { Text = "Anti-aliasing DirectX 11", Location = new Point(12, 365), Size = new Size(635, 83) };
+            var aaGroup = new GroupBox { Text = "Anti-aliasing DirectX 11", Location = new Point(12, 442), Size = new Size(635, 83) };
             aaGroup.Controls.Add(new Label { Text = "Mode :", AutoSize = true, Location = new Point(14, 26) });
             _antiAliasingCombo.Location = new Point(165, 22);
             _antiAliasingCombo.Items.Add(new SourceChoice("Off", Localization.T("Désactivé")));
@@ -687,7 +734,7 @@ namespace Broadcaster
 
             // Traitements indépendants du format natif : Standard conserve le rendu
             // actuel, Bicubic/Adaptive ne modifient que l'interpolation chromatique.
-            var cleanupGroup = new GroupBox { Text = "Nettoyage de l'image (GPU)", Location = new Point(12, 453), Size = new Size(635, 183) };
+            var cleanupGroup = new GroupBox { Text = "Nettoyage de l'image (GPU)", Location = new Point(12, 530), Size = new Size(635, 183) };
             cleanupGroup.Controls.Add(new Label { Text = "Reconstruction chromatique :", AutoSize = true, Location = new Point(14, 27) });
             _chromaCombo.Location = new Point(180, 23);
             _chromaCombo.Items.Add(new SourceChoice("Standard", Localization.T("Standard (actuel)")));
@@ -709,7 +756,7 @@ namespace Broadcaster
             cleanupGroup.Controls.AddRange(new Control[] { _debandStrength, _debandValue });
             page.Controls.Add(cleanupGroup);
 
-            var sourceGroup = new GroupBox { Text = "Qualité de la source HDMI", Location = new Point(12, 642), Size = new Size(635, 162) };
+            var sourceGroup = new GroupBox { Text = "Qualité de la source HDMI", Location = new Point(12, 719), Size = new Size(635, 162) };
             AddChoices(_sourceFormatCombo, "Auto", "YUY2", "UYVY", "NV12", "RGB32", "P010", "MJPEG", "H264", "HEVC");
             AddChoices(_yuvMatrixCombo, "Auto", "BT.709", "BT.601");
             AddChoices(_yuvRangeCombo, "Auto", "Limited", "Full");
@@ -728,7 +775,7 @@ namespace Broadcaster
             UpdateActiveVideoStatus();
             sourceGroup.Controls.Add(_sourceFormatStatus);
             page.Controls.Add(sourceGroup);
-            page.AutoScrollMinSize = new Size(0, 820);
+            page.AutoScrollMinSize = new Size(0, 900);
 
             page.Controls.Add(profileLabel);
             page.Controls.Add(_profileCombo);
@@ -892,6 +939,7 @@ namespace Broadcaster
             SetRowValue(_saturationRow, profile.Saturation, editable);
 
             _updatingVideoUi = true;
+            _gpuEnhancementsEnabled.Checked = editable && profile.GpuEnhancementsEnabled;
             _sharpenEnabled.Checked = editable && profile.SharpenEnabled;
             _sharpenAmount.Value = Clamp(profile.SharpenAmount, -100, 100);
             SelectChoice(_antiAliasingCombo, profile.AntiAliasingMode ?? "Off");
@@ -912,6 +960,7 @@ namespace Broadcaster
                 _previousProfileIndex >= _profileSet.Profiles.Count) return;
             var p = _profileSet.Profiles[_previousProfileIndex];
             if (p.IsDefault) return;
+            p.GpuEnhancementsEnabled = _gpuEnhancementsEnabled.Checked;
             p.SharpenEnabled = _sharpenEnabled.Checked;
             p.SharpenAmount = _sharpenAmount.Value;
             p.AntiAliasingMode = SelectedChoice(_antiAliasingCombo);
@@ -927,12 +976,17 @@ namespace Broadcaster
         {
             bool editable = _profileSet != null && _profileCombo.SelectedIndex >= 0 &&
                 !_profileSet.Profiles[_profileCombo.SelectedIndex].IsDefault;
-            _sharpenEnabled.Enabled = editable;
-            _sharpenAmount.Enabled = editable && _sharpenEnabled.Checked;
-            _antiAliasingCombo.Enabled = editable;
-            _chromaCombo.Enabled = editable;
-            _debandEnabled.Enabled = editable;
-            _debandStrength.Enabled = editable && _debandEnabled.Checked;
+            _gpuEnhancementsEnabled.Enabled = editable;
+            _gpuEnhancementsEnabled.Text = Localization.T(_gpuEnhancementsEnabled.Checked
+                ? "Améliorations GPU : activées"
+                : "Améliorations GPU : désactivées");
+            bool effectsEditable = editable && _gpuEnhancementsEnabled.Checked;
+            _sharpenEnabled.Enabled = effectsEditable;
+            _sharpenAmount.Enabled = effectsEditable && _sharpenEnabled.Checked;
+            _antiAliasingCombo.Enabled = effectsEditable;
+            _chromaCombo.Enabled = effectsEditable;
+            _debandEnabled.Enabled = effectsEditable;
+            _debandStrength.Enabled = effectsEditable && _debandEnabled.Checked;
             _debandValue.Text = _debandStrength.Value + " %";
             _sourceFormatCombo.Enabled = editable;
             _yuvMatrixCombo.Enabled = editable;
@@ -1144,6 +1198,8 @@ namespace Broadcaster
                 CaptureTargetFps = CaptureFpsPresets[Math.Max(0, _captureFpsCombo.SelectedIndex)],
                 PreviewVsync = _previewVsyncCheck.Checked,
                 ShowDebugOverlay = _debugOverlayCheck.Checked,
+                PreventSleepWhileCapturing = _preventSleepCheck.Checked,
+                FrameInterpolation = _interpolationCheck.Checked ? "X2" : "Off",
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
                 NoSignalDetectionEnabled = _noSignalEnabledCheck.Checked,
                 AutoReloadOnStart = _autoReloadCheck.Checked,

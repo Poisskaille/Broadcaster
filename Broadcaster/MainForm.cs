@@ -9,6 +9,8 @@ namespace Broadcaster
     public class MainForm : Form, IMessageFilter
     {
         private readonly CaptureSession _capture = new CaptureSession();
+        private readonly CaptureSleepGuard _sleepGuard = new CaptureSleepGuard();
+        private readonly System.Windows.Forms.Timer _sleepTimer = new System.Windows.Forms.Timer { Interval = 2000 };
         private readonly Panel _renderSurface = new Panel();
         private AppConfig _config;
         // Overlay indépendant du HWND D3D/EVR. Ne modifie ni le pipeline ni les samples.
@@ -18,6 +20,7 @@ namespace Broadcaster
         private readonly Stopwatch _debugFpsClock = new Stopwatch();
         private long _lastReceivedSamples = -1;
         private long _lastPresentedSamples = -1;
+        private long _lastGeneratedSamples = -1;
 
         // Replay : tampon vidéo/audio des dernières secondes (désactivé par défaut).
         private readonly ReplayClipRecorder _clipRecorder = new ReplayClipRecorder();
@@ -75,6 +78,7 @@ namespace Broadcaster
             Move += (s, e) => PositionDebugOverlay();
             SizeChanged += (s, e) => PositionDebugOverlay();
             _debugRefreshTimer.Tick += (s, e) => RefreshDebugOverlay();
+            _sleepTimer.Tick += (s, e) => RefreshSleepGuard();
 
             _capture.OnError += message =>
             {
@@ -159,6 +163,7 @@ namespace Broadcaster
             Localization.UseLanguage(_config.Language);
             EnterFullscreen();
             _clipRegionTimer.Start();
+            _sleepTimer.Start();
             ApplyDebugOverlaySetting();
 
             if (_config.NoSignalDetectionEnabled)
@@ -412,6 +417,7 @@ namespace Broadcaster
                         _config = form.ResultConfig;
                         Localization.UseLanguage(_config.Language);
                         _config.Save();
+                        RefreshSleepGuard();
                         MoveFullscreenToConfiguredScreen();
                         ApplyDebugOverlaySetting();
 
@@ -541,7 +547,7 @@ namespace Broadcaster
                 try
                 {
                     _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle,
-                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync);
+                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync, _config.FrameInterpolation == "X2");
                 }
                 catch (Exception)
                 {
@@ -550,10 +556,11 @@ namespace Broadcaster
                     if (!TrySwitchActiveFormatToAuto(out ColorProfile automaticProfile)) throw;
                     activeProfile = automaticProfile;
                     _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle,
-                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync);
+                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync, _config.FrameInterpolation == "X2");
                 }
                 _unrecoverableErrorShown = false;
                 _capture.SetVolume(_config.Volume);
+                RefreshSleepGuard();
 
                 // Lancer le tampon SANS attendre SessionStarted : le callback n'est
                 // pas garanti sur tous les pilotes/carte de capture.
@@ -582,6 +589,14 @@ namespace Broadcaster
 
         // L'overlay est volontairement une petite fenêtre transparente aux clics,
         // possédée par ce formulaire, pour passer AU-DESSUS du rendu natif D3D11/EVR.
+        private void RefreshSleepGuard()
+        {
+            // A missing/failed source must never keep the PC awake indefinitely.
+            bool active = _config != null && _config.PreventSleepWhileCapturing &&
+                !string.IsNullOrEmpty(_capture.ActiveVideoSymbolicLink);
+            _sleepGuard.Update(active);
+        }
+
         private void ApplyDebugOverlaySetting()
         {
             if (_config == null || !_config.ShowDebugOverlay)
@@ -636,17 +651,21 @@ namespace Broadcaster
             PositionDebugOverlay();
             long received = _capture.ReceivedVideoSamples;
             long presented = _capture.PresentedVideoSamples;
+            long generated = _capture.GeneratedVideoSamples;
             double elapsed = _debugFpsClock.Elapsed.TotalSeconds;
             bool measurable = received >= 0 && presented >= 0;
-            double fpsReceived = 0, fpsPresented = 0;
+            double fpsReceived = 0, fpsPresented = 0, fpsGenerated = 0;
             if (elapsed > 0.3 && measurable && _lastReceivedSamples >= 0 && _lastPresentedSamples >= 0)
             {
                 // Un rechargement de session repart de zéro : pas de FPS négatifs.
                 fpsReceived = Math.Max(0, received - (received < _lastReceivedSamples ? 0 : _lastReceivedSamples)) / elapsed;
                 fpsPresented = Math.Max(0, presented - (presented < _lastPresentedSamples ? 0 : _lastPresentedSamples)) / elapsed;
+                if (generated >= 0 && _lastGeneratedSamples >= 0)
+                    fpsGenerated = Math.Max(0, generated - (generated < _lastGeneratedSamples ? 0 : _lastGeneratedSamples)) / elapsed;
             }
             _lastReceivedSamples = received;
             _lastPresentedSamples = presented;
+            _lastGeneratedSamples = generated;
             _debugFpsClock.Restart();
 
             var stats = _debugMonitor?.Latest;
@@ -676,7 +695,10 @@ namespace Broadcaster
                 }
                 else bitrate = Localization.T("n/d (compressé)");
             }
-            _debugOverlay.SetMetrics(cpu, gpu, receivedText, presentedText, bitrate, format);
+            _debugOverlay.SetMetrics(cpu, gpu, receivedText, presentedText, bitrate, format,
+                _config.FrameInterpolation == "X2" && measurable
+                    ? fpsGenerated.ToString("0.0", CultureInfo.InvariantCulture) + " FPS"
+                    : null);
         }
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -689,6 +711,9 @@ namespace Broadcaster
                 e.Cancel = true;
                 return;
             }
+            _sleepTimer.Stop();
+            _sleepTimer.Dispose();
+            _sleepGuard.Dispose();
             _debugRefreshTimer.Stop();
             _debugRefreshTimer.Dispose();
             _debugOverlay?.Close();

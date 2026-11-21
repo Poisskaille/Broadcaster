@@ -20,6 +20,7 @@ namespace Broadcaster
         private string _capturedFps = Localization.T("n/d");
         private string _presentedFps = Localization.T("n/d");
         private string _bitrate = Localization.T("n/d");
+        private string _generatedFps;
         private string _mode = Localization.T("Aucune source");
 
         private static readonly Color LabelColor = Color.FromArgb(186, 194, 204);
@@ -56,7 +57,7 @@ namespace Broadcaster
         }
 
         public void SetMetrics(string cpu, string gpu, string capturedFps,
-            string presentedFps, string bitrate, string mode)
+            string presentedFps, string bitrate, string mode, string generatedFps = null)
         {
             if (IsDisposed) return;
             _cpu = cpu ?? Localization.T("n/d");
@@ -64,6 +65,7 @@ namespace Broadcaster
             _capturedFps = capturedFps ?? Localization.T("n/d");
             _presentedFps = presentedFps ?? Localization.T("n/d");
             _bitrate = bitrate ?? Localization.T("n/d");
+            _generatedFps = generatedFps;
             _mode = mode ?? Localization.T("Aucune source");
             Invalidate();
         }
@@ -118,6 +120,11 @@ namespace Broadcaster
                 ? new[] { Localization.T("CPU "), Localization.T("GPU "), Localization.T("CAP "), Localization.T("AFF "), Localization.T("DÉBIT ") }
                 : new[] { Localization.T("CPU "), Localization.T("GPU "), Localization.T("FPS carte "), Localization.T("FPS écran "), Localization.T("Débit ") };
             string[] values = { _cpu, _gpu, _capturedFps, _presentedFps, _bitrate };
+            if (_generatedFps != null && Width >= 1080)
+            {
+                labels = new[] { labels[0], labels[1], labels[2], labels[3], Localization.T("FPS générés "), labels[4] };
+                values = new[] { _cpu, _gpu, _capturedFps, _presentedFps, _generatedFps, _bitrate };
+            }
 
             const int pad = 12;
             const int separatorSpace = 18;
