@@ -27,6 +27,7 @@ namespace Broadcaster
         // Off / X2. Preview interpolation does not change the HDMI capture FPS.
         public string FrameInterpolation { get; set; } = "Off";
 
+        public DiscordPresenceSettings DiscordPresence { get; set; } = new DiscordPresenceSettings();
         public string DisplayDeviceName { get; set; } = "";
         public KeyBindings Bindings { get; set; } = new KeyBindings();
         public bool AutoReloadOnStart { get; set; } = true;
@@ -81,6 +82,15 @@ namespace Broadcaster
                     config.PreventSleepWhileCapturing = awake;
                 if (values.TryGetValue("FrameInterpolation", out var interpolation))
                     config.FrameInterpolation = string.Equals(interpolation, "X2", StringComparison.OrdinalIgnoreCase) ? "X2" : "Off";
+                if (values.TryGetValue("DiscordEnabled", out var dpEnable) && bool.TryParse(dpEnable, out var dpOn)) config.DiscordPresence.Enabled = dpOn;
+                if (values.TryGetValue("DiscordApplicationId", out var dpApp)) config.DiscordPresence.ApplicationId = dpApp;
+                if (values.TryGetValue("DiscordMode", out var dpMode)) config.DiscordPresence.Mode = dpMode;
+                if (values.TryGetValue("DiscordPlatform", out var dpPlatform)) config.DiscordPresence.Platform = dpPlatform;
+                if (values.TryGetValue("DiscordManualGame", out var dpGame)) config.DiscordPresence.ManualGame = dpGame;
+                if (values.TryGetValue("DiscordImageKey", out var dpImg)) config.DiscordPresence.ImageKey = dpImg;
+                if (values.TryGetValue("DiscordNintendoPresenceUrl", out var dpUrl)) config.DiscordPresence.NintendoPresenceUrl = dpUrl;
+                if (values.TryGetValue("DiscordShowElapsed", out var dpElapsed) && bool.TryParse(dpElapsed, out var dpElapsedOn)) config.DiscordPresence.ShowElapsed = dpElapsedOn;
+                config.DiscordPresence.Normalize();
                 if (values.TryGetValue("DisplayDeviceName", out var dn)) config.DisplayDeviceName = dn;
                 if (values.TryGetValue("NoSignalDetectionEnabled", out var nsd) && bool.TryParse(nsd, out var _nsd)) config.NoSignalDetectionEnabled = _nsd;
 
@@ -133,6 +143,9 @@ namespace Broadcaster
             return fallback;
         }
 
+        // Configuration uses newline-delimited INI, so never let user-provided text add keys.
+        private static string SafeIni(string value) => (value ?? "").Replace("\r", " ").Replace("\n", " ");
+
         public void Save()
         {
             try
@@ -150,6 +163,14 @@ namespace Broadcaster
                     $"ShowDebugOverlay={ShowDebugOverlay}",
                     $"PreventSleepWhileCapturing={PreventSleepWhileCapturing}",
                     $"FrameInterpolation={FrameInterpolation}",
+                    $"DiscordEnabled={DiscordPresence?.Enabled ?? false}",
+                    $"DiscordApplicationId={SafeIni(DiscordPresence?.ApplicationId)}",
+                    $"DiscordMode={SafeIni(DiscordPresence?.Mode)}",
+                    $"DiscordPlatform={SafeIni(DiscordPresence?.Platform)}",
+                    $"DiscordManualGame={SafeIni(DiscordPresence?.ManualGame)}",
+                    $"DiscordImageKey={SafeIni(DiscordPresence?.ImageKey)}",
+                    $"DiscordNintendoPresenceUrl={SafeIni(DiscordPresence?.NintendoPresenceUrl)}",
+                    $"DiscordShowElapsed={DiscordPresence?.ShowElapsed ?? true}",
                     $"DisplayDeviceName={DisplayDeviceName}",
                     $"NoSignalDetectionEnabled={NoSignalDetectionEnabled}",
                     $"Key_OpenMenu={Bindings.OpenMenu}",

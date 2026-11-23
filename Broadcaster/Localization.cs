@@ -67,11 +67,14 @@ namespace Broadcaster
                 default: translations = English; break;
             }
             if (translations.TryGetValue(french, out string translated)) return translated;
+            if (DiscordTranslations.TryGetValue(_language, out var discordLanguage) &&
+                discordLanguage.TryGetValue(french, out translated)) return translated;
             if (FeatureTranslations.TryGetValue(_language, out var featureLanguage) &&
                 featureLanguage.TryGetValue(french, out translated)) return translated;
             // Consistent English fallback when a new translation is missing.
             if (English.TryGetValue(french, out translated)) return translated;
             if (FeatureTranslations["en"].TryGetValue(french, out translated)) return translated;
+            if (DiscordTranslations["en"].TryGetValue(french, out translated)) return translated;
             return french;
         }
 

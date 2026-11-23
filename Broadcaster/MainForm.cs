@@ -10,6 +10,7 @@ namespace Broadcaster
     {
         private readonly CaptureSession _capture = new CaptureSession();
         private readonly CaptureSleepGuard _sleepGuard = new CaptureSleepGuard();
+        private readonly DiscordPresenceService _discordPresence = new DiscordPresenceService();
         private readonly System.Windows.Forms.Timer _sleepTimer = new System.Windows.Forms.Timer { Interval = 2000 };
         private readonly Panel _renderSurface = new Panel();
         private AppConfig _config;
@@ -160,6 +161,7 @@ namespace Broadcaster
         private void MainForm_Shown(object sender, EventArgs e)
         {
             _config = AppConfig.Load();
+            _discordPresence.Apply(_config.DiscordPresence);
             Localization.UseLanguage(_config.Language);
             EnterFullscreen();
             _clipRegionTimer.Start();
@@ -410,13 +412,14 @@ namespace Broadcaster
 
             try
             {
-                using (var form = new OptionsForm(_config, _capture))
+                using (var form = new OptionsForm(_config, _capture, _discordPresence))
                 {
                     if (form.ShowDialog(this) == DialogResult.OK)
                     {
                         _config = form.ResultConfig;
                         Localization.UseLanguage(_config.Language);
                         _config.Save();
+                        _discordPresence.Apply(_config.DiscordPresence);
                         RefreshSleepGuard();
                         MoveFullscreenToConfiguredScreen();
                         ApplyDebugOverlaySetting();
@@ -711,6 +714,7 @@ namespace Broadcaster
                 e.Cancel = true;
                 return;
             }
+            _discordPresence.Dispose();
             _sleepTimer.Stop();
             _sleepTimer.Dispose();
             _sleepGuard.Dispose();

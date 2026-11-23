@@ -38,6 +38,11 @@ namespace Broadcaster
         ("3840 x 2160 (4K UHD)", 3840, 2160),
 };
 
+        private DiscordPresenceSettings _discordSettings;
+        private readonly DiscordPresenceService _discordService;
+        private readonly Label _discordPresenceStatus = new Label { AutoSize = true, MaximumSize = new Size(570, 0), ForeColor = Color.DimGray };
+        private readonly Button _discordPresenceButton = new Button { Text = "Discord Rich Presence...", AutoSize = true };
+        private readonly Label _discordPresenceHint = new Label { Text = "Afficher le jeu sur Discord : mode manuel ou Nintendo via nxapi.", AutoSize = true, ForeColor = Color.DimGray };
         private readonly CheckBox _debugOverlayCheck = new CheckBox
         {
             Text = "Afficher la banderole de performances (CPU, GPU, FPS, débit)", AutoSize = true
@@ -223,9 +228,11 @@ namespace Broadcaster
 
 
 
-        public OptionsForm(AppConfig currentConfig, CaptureSession captureSession)
+        public OptionsForm(AppConfig currentConfig, CaptureSession captureSession, DiscordPresenceService discordService = null)
         {
             _initialConfig = currentConfig;
+            _discordService = discordService;
+            _discordSettings = (currentConfig.DiscordPresence ?? new DiscordPresenceSettings()).Clone();
             _bindings = currentConfig.Bindings.Clone();
             _captureSession = captureSession;
 
@@ -266,10 +273,17 @@ namespace Broadcaster
             _newProfileButton.Click += (s, e) => CreateNewProfile();
             _renameProfileButton.Click += (s, e) => RenameSelectedProfile();
             _deleteProfileButton.Click += (s, e) => DeleteSelectedProfile();
-            _videoFpsTimer.Tick += (s, e) => UpdateActiveVideoStatus();
+            _videoFpsTimer.Tick += (s, e) => { UpdateActiveVideoStatus(); UpdateDiscordStatus(); };
+            UpdateDiscordStatus();
             _showCaptureModes.Click += (s, e) => ShowCaptureModes();
             _videoFpsTimer.Start();
             FormClosed += (s, e) => { _videoFpsTimer.Stop(); _videoFpsTimer.Dispose(); };
+        }
+
+        private void UpdateDiscordStatus()
+        {
+            _discordPresenceStatus.Text = Localization.T("Statut Discord :") + " " +
+                (string.IsNullOrWhiteSpace(_discordService?.Status) ? Localization.T("Désactivé") : _discordService.Status);
         }
 
         private void ShowCaptureModes()
@@ -415,11 +429,21 @@ namespace Broadcaster
             _interpolationCheck.Location = new Point(15, 530);
             _interpolationCheck.Checked = _initialConfig.FrameInterpolation == "X2";
             _interpolationHint.Location = new Point(35, 560);
+            _discordPresenceButton.Location = new Point(15, 615);
+            _discordPresenceHint.Location = new Point(35, 652);
+            _discordPresenceStatus.Location = new Point(35, 685);
+            _discordPresenceButton.Click += (s, e) =>
+            {
+                using (var dialog = new DiscordPresenceOptionsForm(_discordSettings))
+                    if (dialog.ShowDialog(this) == DialogResult.OK)
+                        _discordSettings = dialog.Result;
+            };
             page.Controls.AddRange(new Control[] {
                 _enableClipsCheck, _clipDurationLabel, _clipDurationInput,
                 _clipFpsLabel, _clipFpsCombo, _clipInfoLabel, _openClipsButton,
                 _debugOverlayCheck, _debugOverlayHint,
-                _preventSleepCheck, _interpolationCheck, _interpolationHint
+                _preventSleepCheck, _interpolationCheck, _interpolationHint,
+                _discordPresenceButton, _discordPresenceHint, _discordPresenceStatus
             });
             RefreshClipControls();
 
@@ -1200,6 +1224,7 @@ namespace Broadcaster
                 ShowDebugOverlay = _debugOverlayCheck.Checked,
                 PreventSleepWhileCapturing = _preventSleepCheck.Checked,
                 FrameInterpolation = _interpolationCheck.Checked ? "X2" : "Off",
+                DiscordPresence = _discordSettings.Clone(),
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
                 NoSignalDetectionEnabled = _noSignalEnabledCheck.Checked,
                 AutoReloadOnStart = _autoReloadCheck.Checked,
