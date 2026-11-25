@@ -30,7 +30,7 @@ namespace Broadcaster
         // que le JPEG est en train d'être compressé.
         private const int MaxPendingFrames = 6;
         private const int JpegWorkerCount = 2;
-        private const int JpegQuality = 85;
+        // La qualite est configurable, sans codec ni bibliotheque externe.
 
         private readonly object _sync = new object();
         private readonly List<ReplayVideoFrame> _frames = new List<ReplayVideoFrame>();
@@ -55,6 +55,8 @@ namespace Broadcaster
         private int _width = 1920;
         private int _height = 1080;
         private int _targetFps = 30;
+        private int _jpegQuality = 85;
+        private int _maxPendingFrames = MaxPendingFrames;
         private int _audioSampleRate;
         private int _saving;
         private string _lastCaptureError;
@@ -113,7 +115,7 @@ namespace Broadcaster
         }
 
         public void Start(int durationSeconds, string audioOutputEndpointId,
-            int outputWidth, int outputHeight, int targetFps)
+            int outputWidth, int outputHeight, int targetFps, int jpegQuality = 85)
         {
             if (outputWidth < 160 || outputWidth > 3840 ||
                 outputHeight < 120 || outputHeight > 2160)
@@ -122,6 +124,8 @@ namespace Broadcaster
             if (targetFps < 10 || targetFps > 60)
                 throw new ArgumentOutOfRangeException(nameof(targetFps),
                     Localization.T("Le FPS cible doit être compris entre 10 et 60."));
+            if (jpegQuality < 60 || jpegQuality > 95)
+                throw new ArgumentOutOfRangeException(nameof(jpegQuality));
             Stop();
             lock (_sync)
             {
@@ -130,6 +134,12 @@ namespace Broadcaster
                 _width = outputWidth;
                 _height = outputHeight;
                 _targetFps = targetFps;
+                _jpegQuality = jpegQuality;
+                // Le GDI bitmap 4K est tres lourd. Limiter la file brute pour
+                // eviter des pics memoire, sans toucher au tampon JPEG compresse.
+                long rawBytes = (long)outputWidth * outputHeight * 3;
+                _maxPendingFrames = (int)Math.Max(2,
+                    Math.Min(MaxPendingFrames, (96L * 1024 * 1024) / Math.Max(1, rawBytes)));
                 _lastCaptureError = null;
                 _consecutiveCaptureFailures = 0;
                 _capturedFrames = 0;
@@ -165,7 +175,8 @@ namespace Broadcaster
             foreach (Thread encoder in _encodeThreads) encoder.Start();
             _captureThread.Start();
             WriteDiagnostic("Tampon démarré : " + _durationSeconds + " s, " +
-                outputWidth + "x" + outputHeight + " @ " + targetFps + " FPS cible, audio " +
+                outputWidth + "x" + outputHeight + " @ " + targetFps +
+                " FPS cible, JPEG " + jpegQuality + " %, file brute " + _maxPendingFrames + ", audio " +
                 (HasAudio ? "actif" : "indisponible (vidéo seule)"));
         }
 
@@ -318,7 +329,7 @@ namespace Broadcaster
                             if (_running && _captureGeneration == generation)
                             {
                                 _capturedFrames++;
-                                while (_pendingFrames.Count >= MaxPendingFrames)
+                                while (_pendingFrames.Count >= _maxPendingFrames)
                                 {
                                     _pendingFrames.Dequeue().Bitmap.Dispose();
                                     _droppedFrames++;
@@ -357,6 +368,8 @@ namespace Broadcaster
         {
             try
             {
+                int jpegQuality;
+                lock (_sync) jpegQuality = _jpegQuality;
                 // Encoder et paramètres réutilisés pour toutes les images :
                 // évite d'énumérer les codecs GDI+ soixante fois par seconde.
                 ImageCodecInfo jpegCodec = ImageCodecInfo.GetImageEncoders()
@@ -364,7 +377,7 @@ namespace Broadcaster
                 using (var quality = new EncoderParameters(1))
                 {
                     quality.Param[0] = new EncoderParameter(
-                        System.Drawing.Imaging.Encoder.Quality, (long)JpegQuality);
+                        System.Drawing.Imaging.Encoder.Quality, (long)jpegQuality);
                     while (true)
                     {
                         PendingVideoFrame pending;
@@ -554,6 +567,16 @@ namespace Broadcaster
                 throw new InvalidOperationException(Localization.T("Un clip est déjà en cours d'enregistrement."));
             try
             {
+                // Evite de perdre les dernieres images encore en cours de
+                // compression au moment de l'appui sur la touche du clip.
+                // Attente non bloquante (max 200 ms) : la capture continue.
+                for (int retry = 0; retry < 8; retry++)
+                {
+                    bool hasPending;
+                    lock (_sync) hasPending = _running && _pendingFrames.Count > 0;
+                    if (!hasPending) break;
+                    await Task.Delay(25).ConfigureAwait(false);
+                }
                 List<ReplayVideoFrame> frames;
                 List<ReplayAudioChunk> audio;
                 int sampleRate;
@@ -605,16 +628,19 @@ namespace Broadcaster
                 string filename = "Broadcaster_Clip_" + DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff") +
                     "_" + Guid.NewGuid().ToString("N").Substring(0, 6) + ".avi";
                 string path = Path.Combine(folder, filename);
+                string temporaryPath = path + ".partial";
 
                 return await Task.Run(() =>
                 {
                     try
                     {
-                        ReplayAviWriter.Write(path, frames, audio, sampleRate,
+                        // On ecrit un .partial, puis on publie uniquement un AVI
+                        // complet. Pas de clip corrompu visible comme resultat final.
+                        ReplayAviWriter.Write(temporaryPath, frames, audio, sampleRate,
                             width, height, targetFps, MaximumAviSize);
-                        // Le fichier doit contenir l'en-tête AVI et les données.
-                        if (!File.Exists(path) || new FileInfo(path).Length < 1024)
+                        if (!File.Exists(temporaryPath) || new FileInfo(temporaryPath).Length < 1024)
                             throw new IOException(Localization.T("Le fichier AVI produit est vide ou incomplet."));
+                        File.Move(temporaryPath, path);
                         double seconds = frames.Count >= 2
                             ? (frames[frames.Count - 1].Time - frames[0].Time).TotalSeconds
                             : 0;
@@ -638,7 +664,7 @@ namespace Broadcaster
                     }
                     catch
                     {
-                        try { File.Delete(path); } catch { }
+                        try { File.Delete(temporaryPath); } catch { }
                         throw;
                     }
                 });
@@ -704,7 +730,9 @@ namespace Broadcaster
             if (_disposed) return;
             Stop();
             _disposed = true;
-            _wakeup.Dispose();
+            // Le thread de capture peut encore etre dans GDI apres le timeout
+            // de Join(). Ne pas detruire son event pendant qu'il s'en sert.
+            // Cette ressource sera liberee lors de la fin du processus.
         }
     }
 

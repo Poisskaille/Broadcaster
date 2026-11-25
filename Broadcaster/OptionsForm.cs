@@ -85,6 +85,12 @@ namespace Broadcaster
         };
         private readonly Label _clipDurationLabel = new Label { Text = "Durée du clip (secondes) :", AutoSize = true };
         private readonly Label _clipFpsLabel = new Label { Text = "FPS cible du clip :", AutoSize = true };
+        private readonly Label _clipQualityLabel = new Label { Text = "Qualité JPEG du clip :", AutoSize = true };
+        private readonly ComboBox _clipQualityCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, Width = 140
+        };
+        private static readonly int[] ClipQualityPresets = { 70, 85, 95 };
         private readonly ComboBox _clipFpsCombo = new ComboBox
         {
             DropDownStyle = ComboBoxStyle.DropDownList, Width = 90
@@ -373,6 +379,7 @@ namespace Broadcaster
 
         private void BuildExtrasTab(TabPage page)
         {
+            page.AutoScroll = true;
             var label = new Label
             {
                 Text = Localization.T("Image affichée quand aucun signal n’est reçu depuis 10 secondes :"),
@@ -422,34 +429,56 @@ namespace Broadcaster
             foreach (int value in ClipFpsPresets) _clipFpsCombo.Items.Add(value + " FPS");
             int fpsIndex = Array.IndexOf(ClipFpsPresets, _initialConfig.ClipTargetFps);
             _clipFpsCombo.SelectedIndex = fpsIndex >= 0 ? fpsIndex : 4;
-            _clipInfoLabel.Location = new Point(35, 314);
-            _openClipsButton.Location = new Point(15, 380);
+            _clipQualityLabel.Location = new Point(35, 310);
+            _clipQualityCombo.Location = new Point(220, 305);
+            foreach (int value in ClipQualityPresets) _clipQualityCombo.Items.Add(value + "%");
+            int qualityIndex = Array.IndexOf(ClipQualityPresets, _initialConfig.ClipJpegQuality);
+            _clipQualityCombo.SelectedIndex = qualityIndex >= 0 ? qualityIndex : 1;
+            _clipInfoLabel.Location = new Point(35, 342);
+            _openClipsButton.Location = new Point(15, 399);
             _openClipsButton.Click += (s, e) => OpenClipsFolder();
-            _debugOverlayCheck.Location = new Point(15, 427);
+            _debugOverlayCheck.Location = new Point(15, 446);
             _debugOverlayCheck.Checked = _initialConfig.ShowDebugOverlay;
-            _debugOverlayHint.Location = new Point(35, 455);
-            _preventSleepCheck.Location = new Point(15, 494);
+            _debugOverlayHint.Location = new Point(35, 474);
+            _preventSleepCheck.Location = new Point(15, 513);
             _preventSleepCheck.Checked = _initialConfig.PreventSleepWhileCapturing;
-            _interpolationLabel.Location = new Point(15, 530);
-            _interpolationCombo.Location = new Point(255, 526);
+            _interpolationLabel.Location = new Point(15, 549);
+            _interpolationCombo.Location = new Point(255, 545);
             _interpolationCombo.Items.AddRange(new object[] {
                 Localization.T("Désactivé (FPS natifs)"),
                 "×2", "×3", "×4", "×5"
             });
             _interpolationCombo.SelectedIndex = AppConfig.InterpolationFactor(_initialConfig.FrameInterpolation) - 1;
-            _interpolationHint.Location = new Point(35, 560);
-            _discordPresenceButton.Location = new Point(15, 615);
-            _discordPresenceHint.Location = new Point(35, 652);
-            _discordPresenceStatus.Location = new Point(35, 685);
+            _interpolationHint.Location = new Point(35, 579);
+            _discordPresenceButton.Location = new Point(15, 634);
+            _discordPresenceHint.Location = new Point(35, 671);
+            _discordPresenceStatus.Location = new Point(35, 704);
             _discordPresenceButton.Click += (s, e) =>
             {
                 using (var dialog = new DiscordPresenceOptionsForm(_discordSettings))
+                {
                     if (dialog.ShowDialog(this) == DialogResult.OK)
-                        _discordSettings = dialog.Result;
+                    {
+                        // Enregistrement immediat : ne depend plus du bouton OK des
+                        // Options generales. Evite les pertes lors des mises a jour.
+                        if (!AppConfig.TrySaveDiscordPresence(dialog.Result, out string saveError))
+                        {
+                            MessageBox.Show(this,
+                                Localization.T("Impossible de sauvegarder la présence Discord :") + " " + saveError,
+                                "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+                        _discordSettings = dialog.Result.Clone();
+                        _initialConfig.DiscordPresence = _discordSettings.Clone();
+                        _discordService?.Apply(_discordSettings);
+                        UpdateDiscordStatus();
+                    }
+                }
             };
             page.Controls.AddRange(new Control[] {
                 _enableClipsCheck, _clipDurationLabel, _clipDurationInput,
-                _clipFpsLabel, _clipFpsCombo, _clipInfoLabel, _openClipsButton,
+                _clipFpsLabel, _clipFpsCombo, _clipQualityLabel, _clipQualityCombo,
+                _clipInfoLabel, _openClipsButton,
                 _debugOverlayCheck, _debugOverlayHint,
                 _preventSleepCheck, _interpolationLabel, _interpolationCombo, _interpolationHint,
                 _discordPresenceButton, _discordPresenceHint, _discordPresenceStatus
@@ -481,6 +510,8 @@ namespace Broadcaster
             _clipDurationInput.Visible = enabled;
             _clipFpsLabel.Visible = enabled;
             _clipFpsCombo.Visible = enabled;
+            _clipQualityLabel.Visible = enabled;
+            _clipQualityCombo.Visible = enabled;
             _clipInfoLabel.Visible = enabled;
         }
 
@@ -1240,6 +1271,7 @@ namespace Broadcaster
                 ClipsEnabled = _enableClipsCheck.Checked,
                 ClipDurationSeconds = (int)_clipDurationInput.Value,
                 ClipTargetFps = ClipFpsPresets[Math.Max(0, _clipFpsCombo.SelectedIndex)],
+                ClipJpegQuality = ClipQualityPresets[Math.Max(0, _clipQualityCombo.SelectedIndex)],
                 Language = Localization.LanguageCodes[Math.Max(0, _languageCombo.SelectedIndex)],
                 Bindings = _bindings.Clone(),
             };

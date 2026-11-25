@@ -262,6 +262,9 @@ try {
         $relative = $file.FullName.Substring($payloadDir.Length).TrimStart('\')
         # Les configurations et contenus personnels ne sont jamais écrasés.
         if ($relative -ieq 'config.ini' -or
+            $relative -ieq 'config.ini.bak' -or
+            $relative -ieq 'discord-presence.ini' -or
+            $relative -ieq 'discord-presence.ini.bak' -or
             $relative -like 'Screenshots\*' -or
             $relative -like 'ColorProfiles\*') { continue }
 

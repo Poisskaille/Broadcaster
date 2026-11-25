@@ -418,7 +418,10 @@ namespace Broadcaster
                     {
                         _config = form.ResultConfig;
                         Localization.UseLanguage(_config.Language);
-                        _config.Save();
+                        if (!_config.TrySave(out string configSaveError))
+                            MessageBox.Show(this,
+                                Localization.T("Impossible d'enregistrer les options :") + " " + configSaveError,
+                                "Broadcaster", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         _discordPresence.Apply(_config.DiscordPresence);
                         RefreshSleepGuard();
                         MoveFullscreenToConfiguredScreen();
@@ -572,7 +575,8 @@ namespace Broadcaster
                     try
                     {
                         _clipRecorder.Start(_config.ClipDurationSeconds, _config.AudioEndpointId,
-                            _config.Width, _config.Height, _config.ClipTargetFps);
+                            _config.Width, _config.Height, _config.ClipTargetFps,
+                            _config.ClipJpegQuality);
                         UpdateClipCaptureBounds();
                     }
                     catch (Exception clipError)

@@ -44,8 +44,16 @@ namespace Broadcaster
         private readonly bool _previewVsync;
         private readonly int _interpolationFactor;
         private bool _interpolateFrames => _interpolationFactor > 1;
+        // The generation budget must follow the cadence ACTUALLY received from
+        // Media Foundation, not only the nominal HDMI target chosen in the UI.
+        // This is what makes a 20 FPS capture + X3 visibly differ from a 60 FPS capture.
+        private double _observedSourceFps = 60.0;
+        private long _lastSourceTimestamp = long.MinValue;
+        private long _lastSourceArrivalTick;
+        private double EffectiveSourceFps => Math.Max(1.0, Math.Min(240.0,
+            _observedSourceFps > 1.0 ? _observedSourceFps : _requestedSourceFps));
         private bool _canGenerateFrames => _interpolateFrames && !_interpolationSuspended &&
-            _monitorRefreshHz > _requestedSourceFps * 1.001;
+            _monitorRefreshHz > EffectiveSourceFps * 1.001;
         private double _interpolationRemainder;
         private double _monitorRefreshHz = 60.0;
         private long _lastMonitorRefreshQueryTick;
@@ -332,6 +340,26 @@ namespace Broadcaster
             Texture2D<float4> LaterFrame : register(t5);
             cbuffer InterpOptions : register(b1) { float4 InterpSettings; };
             float LumaInterp(float3 c) { return dot(c, float3(0.2126,0.7152,0.0722)); }
+            float MotionPatchError(float2 uvPrev, float2 uvNext, float2 pixel)
+            {
+                float3 p0 = EarlierFrame.SampleLevel(LinearSample, uvPrev, 0).rgb;
+                float3 p1 = EarlierFrame.SampleLevel(LinearSample, uvPrev + float2(pixel.x, 0), 0).rgb;
+                float3 p2 = EarlierFrame.SampleLevel(LinearSample, uvPrev - float2(pixel.x, 0), 0).rgb;
+                float3 p3 = EarlierFrame.SampleLevel(LinearSample, uvPrev + float2(0, pixel.y), 0).rgb;
+                float3 p4 = EarlierFrame.SampleLevel(LinearSample, uvPrev - float2(0, pixel.y), 0).rgb;
+                float3 n0 = LaterFrame.SampleLevel(LinearSample, uvNext, 0).rgb;
+                float3 n1 = LaterFrame.SampleLevel(LinearSample, uvNext + float2(pixel.x, 0), 0).rgb;
+                float3 n2 = LaterFrame.SampleLevel(LinearSample, uvNext - float2(pixel.x, 0), 0).rgb;
+                float3 n3 = LaterFrame.SampleLevel(LinearSample, uvNext + float2(0, pixel.y), 0).rgb;
+                float3 n4 = LaterFrame.SampleLevel(LinearSample, uvNext - float2(0, pixel.y), 0).rgb;
+                float e = abs(LumaInterp(p0) - LumaInterp(n0));
+                e += 0.45 * abs(LumaInterp(p1) - LumaInterp(n1));
+                e += 0.45 * abs(LumaInterp(p2) - LumaInterp(n2));
+                e += 0.45 * abs(LumaInterp(p3) - LumaInterp(n3));
+                e += 0.45 * abs(LumaInterp(p4) - LumaInterp(n4));
+                e += 0.20 * length(p0 - n0);
+                return e;
+            }
             float4 IntermediatePS(VertexOut input) : SV_Target
             {
                 float2 uv = input.uv;
@@ -340,24 +368,32 @@ namespace Broadcaster
                 float3 next = LaterFrame.SampleLevel(LinearSample, uv, 0).rgb;
                 float t = saturate(InterpSettings.x);
                 float3 baseBlend = lerp(prev, next, t);
-                float best = 100.0;
-                float2 motion = float2(0,0);
-                float prevLuma = LumaInterp(prev);
-                [unroll] for (int y = -1; y <= 1; ++y)
+                float best = 1000.0;
+                float2 motion = float2(0, 0);
+                [unroll] for (int y = -2; y <= 2; ++y)
                 {
-                    [unroll] for (int x = -1; x <= 1; ++x)
+                    [unroll] for (int x = -2; x <= 2; ++x)
                     {
-                        float2 v = float2(x,y) * pixel * 2.0;
-                        float3 sampleC = LaterFrame.SampleLevel(LinearSample, uv+v, 0).rgb;
-                        float err = abs(prevLuma - LumaInterp(sampleC)) +
-                                    0.08*(abs(v.x/pixel.x)+abs(v.y/pixel.y))/4.0;
-                        if (err < best) { best = err; motion = v; }
+                        float2 v = float2(x, y) * pixel;
+                        float err = MotionPatchError(uv, uv + v, pixel);
+                        err += 0.035 * (abs((float)x) + abs((float)y));
+                        if (err < best)
+                        {
+                            best = err;
+                            motion = v;
+                        }
                     }
                 }
-                float3 earlier = EarlierFrame.SampleLevel(LinearSample, uv-motion*t, 0).rgb;
-                float3 later = LaterFrame.SampleLevel(LinearSample, uv+motion*(1.0-t), 0).rgb;
-                float confidence = saturate((0.15 - best) * 8.0);
-                return float4(saturate(lerp(baseBlend, lerp(earlier,later,t), confidence)),1);
+                float3 warpedPrev = EarlierFrame.SampleLevel(LinearSample, uv - motion * t, 0).rgb;
+                float3 warpedNext = LaterFrame.SampleLevel(LinearSample, uv + motion * (1.0 - t), 0).rgb;
+                float3 motionBlend = lerp(warpedPrev, warpedNext, t);
+                float disagreement = length(warpedPrev - warpedNext);
+                float temporalDelta = abs(LumaInterp(prev) - LumaInterp(next));
+                float confidence = saturate((0.28 - best) * 3.8);
+                confidence *= saturate(1.0 - disagreement * 1.35);
+                confidence *= saturate(1.0 - temporalDelta * 0.65 + 0.25);
+                float3 result = lerp(baseBlend, motionBlend, confidence);
+                return float4(saturate(result), 1);
             }
             float4 CopyCurrentPS(VertexOut input) : SV_Target
             {
@@ -564,6 +600,7 @@ namespace Broadcaster
                             continue;
                         }
                         Interlocked.Increment(ref _receivedSamples);
+                        UpdateObservedCadence(timestamp);
                         ResizeSwapChainIfNecessary();
                         if (_interpolateFrames) RefreshMonitorRate();
                         UploadSample(sample);
@@ -576,7 +613,7 @@ namespace Broadcaster
                                 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                             // Automatically return to native preview if multi-frame
                             // presentation repeatedly exceeds the HDMI frame budget.
-                            if (drawMs > 1600.0 / _requestedSourceFps)
+                            if (drawMs > 1600.0 / EffectiveSourceFps)
                                 _slowInterpolationFrames++;
                             else
                                 _slowInterpolationFrames = 0;
@@ -1105,6 +1142,31 @@ namespace Broadcaster
             catch { /* Keep last known display refresh; never stop HDMI capture. */ }
         }
 
+        private void UpdateObservedCadence(long timestamp)
+        {
+            long arrival = Stopwatch.GetTimestamp();
+            double seconds = 0;
+            if (_lastSourceTimestamp != long.MinValue && timestamp > _lastSourceTimestamp)
+            {
+                seconds = (timestamp - _lastSourceTimestamp) / 10000000.0; // MF timestamp = 100 ns units
+            }
+            else if (_lastSourceArrivalTick != 0 && arrival > _lastSourceArrivalTick)
+            {
+                seconds = (arrival - _lastSourceArrivalTick) / (double)Stopwatch.Frequency;
+            }
+
+            _lastSourceTimestamp = timestamp;
+            _lastSourceArrivalTick = arrival;
+
+            if (seconds <= 0.001 || seconds > 1.0) return;
+            double fps = 1.0 / seconds;
+            fps = Math.Max(1.0, Math.Min(240.0, fps));
+            if (_observedSourceFps <= 1.0)
+                _observedSourceFps = fps;
+            else
+                _observedSourceFps = _observedSourceFps * 0.85 + fps * 0.15;
+        }
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct NativeDisplayMode
         {
@@ -1129,7 +1191,7 @@ namespace Broadcaster
         private int CountIntermediateFrames()
         {
             RefreshMonitorRate();
-            double desired = Math.Min(_interpolationFactor, _monitorRefreshHz / _requestedSourceFps);
+            double desired = Math.Min(_interpolationFactor, _monitorRefreshHz / EffectiveSourceFps);
             if (desired <= 1.001) { _interpolationRemainder = 0; return 0; }
             _interpolationRemainder += desired - 1.0;
             int count = Math.Min(_interpolationFactor - 1, (int)_interpolationRemainder);
@@ -1165,7 +1227,7 @@ namespace Broadcaster
                 context.PixelShader.SetShaderResource(5, _interpCurrentSrv);
                 context.PixelShader.SetConstantBuffer(1, _interpParamsBuffer);
                 long cycleStart = Stopwatch.GetTimestamp();
-                double stepMs = 1000.0 / Math.Max(_requestedSourceFps, 1.0) / (extraFrames + 1);
+                double stepMs = 1000.0 / Math.Max(EffectiveSourceFps, 1.0) / (extraFrames + 1);
                 for (int i = 1; i <= extraFrames && _running; i++)
                 {
                     // One constant per fractional time step, not repeated ×2 frames.
@@ -1176,7 +1238,7 @@ namespace Broadcaster
                     context.Draw(3, 0);
                     // If the monitor cannot hold all requested V-Sync intervals,
                     // avoid turning the HDMI reader into a slow presentation loop.
-                    PresentNative(_monitorRefreshHz >= _requestedSourceFps * (extraFrames + 1) - 0.5);
+                    PresentNative(_monitorRefreshHz >= EffectiveSourceFps * (extraFrames + 1) - 0.5);
                     Interlocked.Increment(ref _generatedSamples);
                     // When V-Sync is off, avoid a burst of frames that only the
                     // last front buffer would show. Sleep lightly, never spin.
