@@ -24,8 +24,23 @@ namespace Broadcaster
         public bool PreviewVsync { get; set; } = false; // can cap preview to monitor refresh
         public bool ShowDebugOverlay { get; set; } = false; // Extras : panneau diagnostic désactivé par défaut
         public bool PreventSleepWhileCapturing { get; set; } = true;
-        // Off / X2. Preview interpolation does not change the HDMI capture FPS.
+        // Off / X2 / X3 / X4 / X5. Does not modify HDMI capture FPS.
         public string FrameInterpolation { get; set; } = "Off";
+
+        // Keep saved mode strings stable across all eight UI languages. Old X2
+        // configurations remain valid; any unknown value safely becomes Off.
+        public static int InterpolationFactor(string value)
+        {
+            switch ((value ?? "").ToUpperInvariant())
+            {
+                case "X2": return 2;
+                case "X3": return 3;
+                case "X4": return 4;
+                case "X5": return 5;
+                default: return 1;
+            }
+        }
+
 
         public DiscordPresenceSettings DiscordPresence { get; set; } = new DiscordPresenceSettings();
         public string DisplayDeviceName { get; set; } = "";
@@ -81,7 +96,7 @@ namespace Broadcaster
                 if (values.TryGetValue("PreventSleepWhileCapturing", out var awakeValue) && bool.TryParse(awakeValue, out var awake))
                     config.PreventSleepWhileCapturing = awake;
                 if (values.TryGetValue("FrameInterpolation", out var interpolation))
-                    config.FrameInterpolation = string.Equals(interpolation, "X2", StringComparison.OrdinalIgnoreCase) ? "X2" : "Off";
+                    config.FrameInterpolation = InterpolationFactor(interpolation) > 1 ? "X" + InterpolationFactor(interpolation) : "Off";
                 if (values.TryGetValue("DiscordEnabled", out var dpEnable) && bool.TryParse(dpEnable, out var dpOn)) config.DiscordPresence.Enabled = dpOn;
                 if (values.TryGetValue("DiscordApplicationId", out var dpApp)) config.DiscordPresence.ApplicationId = dpApp;
                 if (values.TryGetValue("DiscordMode", out var dpMode)) config.DiscordPresence.Mode = dpMode;

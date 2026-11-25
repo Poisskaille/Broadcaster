@@ -142,7 +142,7 @@ namespace Broadcaster
 
         public void Start(VideoDeviceInfo videoDevice, AudioDeviceInfo audioOutputDevice, AudioCaptureDeviceInfo audioCaptureDevice,
                            IntPtr renderHwnd, int targetWidth, int targetHeight, ColorProfile videoSettings = null,
-                           int captureTargetFps = 0, bool previewVsync = false, bool interpolateFrames = false)
+                           int captureTargetFps = 0, bool previewVsync = false, int interpolationFactor = 1)
         {
             Stop();
 
@@ -155,13 +155,13 @@ namespace Broadcaster
             _videoSettings = videoSettings != null && !videoSettings.IsDefault ? videoSettings : null;
             // The default EVR path cannot interpolate. Use a neutral GPU profile
             // without enabling sharpening/color effects if interpolation is requested.
-            if (interpolateFrames && _videoSettings == null)
+            if (interpolationFactor > 1 && _videoSettings == null)
                 _videoSettings = new ColorProfile { Name = "Preview interpolation", IsDefault = false,
                     GpuEnhancementsEnabled = false, SourceFormat = "Auto" };
 
             try
             {
-                StartVideoSession(videoDevice, renderHwnd, targetWidth, targetHeight, captureTargetFps, previewVsync, interpolateFrames);
+                StartVideoSession(videoDevice, renderHwnd, targetWidth, targetHeight, captureTargetFps, previewVsync, interpolationFactor);
 
                 if (audioCaptureDevice?.Activate != null)
                     StartAudioSession(audioCaptureDevice);
@@ -204,7 +204,7 @@ namespace Broadcaster
             }
         }
 
-        private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps, bool previewVsync, bool interpolateFrames)
+        private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps, bool previewVsync, int interpolationFactor)
         {
             _videoSourceActivate = videoDevice.Activate;
             _videoSource = _videoSourceActivate.ActivateObject<MediaSource>();
@@ -229,7 +229,7 @@ namespace Broadcaster
                     break;
                 }
                 D3D11CaptureRenderer renderer = null;
-                renderer = new D3D11CaptureRenderer(_videoSource, renderHwnd, _videoSettings, _selectedSourceFps, previewVsync, interpolateFrames,
+                renderer = new D3D11CaptureRenderer(_videoSource, renderHwnd, _videoSettings, _selectedSourceFps, previewVsync, interpolationFactor,
                     () => { if (ReferenceEquals(_gpuRenderer, renderer)) OnVideoSessionStarted?.Invoke(); },
                     message => { if (ReferenceEquals(_gpuRenderer, renderer)) OnVideoRenderFailure?.Invoke(message); });
                 _gpuRenderer = renderer;

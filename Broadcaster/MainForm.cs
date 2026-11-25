@@ -550,7 +550,7 @@ namespace Broadcaster
                 try
                 {
                     _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle,
-                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync, _config.FrameInterpolation == "X2");
+                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync, AppConfig.InterpolationFactor(_config.FrameInterpolation));
                 }
                 catch (Exception)
                 {
@@ -559,7 +559,7 @@ namespace Broadcaster
                     if (!TrySwitchActiveFormatToAuto(out ColorProfile automaticProfile)) throw;
                     activeProfile = automaticProfile;
                     _capture.Start(videoDevice, audioOutputDevice, audioCaptureDevice, _renderSurface.Handle,
-                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync, _config.FrameInterpolation == "X2");
+                        _config.Width, _config.Height, activeProfile, _config.CaptureTargetFps, _config.PreviewVsync, AppConfig.InterpolationFactor(_config.FrameInterpolation));
                 }
                 _unrecoverableErrorShown = false;
                 _capture.SetVolume(_config.Volume);
@@ -699,7 +699,7 @@ namespace Broadcaster
                 else bitrate = Localization.T("n/d (compressé)");
             }
             _debugOverlay.SetMetrics(cpu, gpu, receivedText, presentedText, bitrate, format,
-                _config.FrameInterpolation == "X2" && measurable
+                AppConfig.InterpolationFactor(_config.FrameInterpolation) > 1 && measurable
                     ? fpsGenerated.ToString("0.0", CultureInfo.InvariantCulture) + " FPS"
                     : null);
         }

@@ -51,13 +51,17 @@ namespace Broadcaster
         {
             Text = "Empêcher la mise en veille pendant la capture", AutoSize = true
         };
-        private readonly CheckBox _interpolationCheck = new CheckBox
+        private readonly Label _interpolationLabel = new Label
         {
-            Text = "Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)", AutoSize = true
+            Text = "Interpolation GPU (expérimental) :", AutoSize = true
+        };
+        private readonly ComboBox _interpolationCombo = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList, Width = 240
         };
         private readonly Label _interpolationHint = new Label
         {
-            Text = "Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11.",
+            Text = "Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native.",
             ForeColor = Color.DimGray, AutoSize = true, MaximumSize = new Size(605, 0)
         };
         private readonly Label _debugOverlayHint = new Label
@@ -426,8 +430,13 @@ namespace Broadcaster
             _debugOverlayHint.Location = new Point(35, 455);
             _preventSleepCheck.Location = new Point(15, 494);
             _preventSleepCheck.Checked = _initialConfig.PreventSleepWhileCapturing;
-            _interpolationCheck.Location = new Point(15, 530);
-            _interpolationCheck.Checked = _initialConfig.FrameInterpolation == "X2";
+            _interpolationLabel.Location = new Point(15, 530);
+            _interpolationCombo.Location = new Point(255, 526);
+            _interpolationCombo.Items.AddRange(new object[] {
+                Localization.T("Désactivé (FPS natifs)"),
+                "×2", "×3", "×4", "×5"
+            });
+            _interpolationCombo.SelectedIndex = AppConfig.InterpolationFactor(_initialConfig.FrameInterpolation) - 1;
             _interpolationHint.Location = new Point(35, 560);
             _discordPresenceButton.Location = new Point(15, 615);
             _discordPresenceHint.Location = new Point(35, 652);
@@ -442,7 +451,7 @@ namespace Broadcaster
                 _enableClipsCheck, _clipDurationLabel, _clipDurationInput,
                 _clipFpsLabel, _clipFpsCombo, _clipInfoLabel, _openClipsButton,
                 _debugOverlayCheck, _debugOverlayHint,
-                _preventSleepCheck, _interpolationCheck, _interpolationHint,
+                _preventSleepCheck, _interpolationLabel, _interpolationCombo, _interpolationHint,
                 _discordPresenceButton, _discordPresenceHint, _discordPresenceStatus
             });
             RefreshClipControls();
@@ -1223,7 +1232,7 @@ namespace Broadcaster
                 PreviewVsync = _previewVsyncCheck.Checked,
                 ShowDebugOverlay = _debugOverlayCheck.Checked,
                 PreventSleepWhileCapturing = _preventSleepCheck.Checked,
-                FrameInterpolation = _interpolationCheck.Checked ? "X2" : "Off",
+                FrameInterpolation = _interpolationCombo.SelectedIndex <= 0 ? "Off" : "X" + (_interpolationCombo.SelectedIndex + 1),
                 DiscordPresence = _discordSettings.Clone(),
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,
                 NoSignalDetectionEnabled = _noSignalEnabledCheck.Checked,

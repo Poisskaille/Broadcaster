@@ -1,6 +1,8 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Diagnostics;
+using System.Windows.Forms;
 using SharpDX;
 using SharpDX.D3DCompiler;
 using SharpDX.Direct3D;
@@ -40,7 +42,14 @@ namespace Broadcaster
         private readonly ColorProfile _profile;
         private readonly double _requestedSourceFps;
         private readonly bool _previewVsync;
-        private readonly bool _interpolateFrames;
+        private readonly int _interpolationFactor;
+        private bool _interpolateFrames => _interpolationFactor > 1;
+        private bool _canGenerateFrames => _interpolateFrames && !_interpolationSuspended &&
+            _monitorRefreshHz > _requestedSourceFps * 1.001;
+        private double _interpolationRemainder;
+        private double _monitorRefreshHz = 60.0;
+        private long _lastMonitorRefreshQueryTick;
+        private D3DBuffer _interpParamsBuffer;
         private Texture2D _interpPrevious, _interpCurrent;
         private ShaderResourceView _interpPreviousSrv, _interpCurrentSrv;
         private PixelShader _interpShader, _interpCopyShader;
@@ -321,6 +330,7 @@ namespace Broadcaster
         private const string InterpolationHlsl = @"
             Texture2D<float4> EarlierFrame : register(t4);
             Texture2D<float4> LaterFrame : register(t5);
+            cbuffer InterpOptions : register(b1) { float4 InterpSettings; };
             float LumaInterp(float3 c) { return dot(c, float3(0.2126,0.7152,0.0722)); }
             float4 IntermediatePS(VertexOut input) : SV_Target
             {
@@ -328,7 +338,8 @@ namespace Broadcaster
                 float2 pixel = 1.0 / Dimensions.zw;
                 float3 prev = EarlierFrame.SampleLevel(LinearSample, uv, 0).rgb;
                 float3 next = LaterFrame.SampleLevel(LinearSample, uv, 0).rgb;
-                float3 baseBlend = (prev + next) * 0.5;
+                float t = saturate(InterpSettings.x);
+                float3 baseBlend = lerp(prev, next, t);
                 float best = 100.0;
                 float2 motion = float2(0,0);
                 float prevLuma = LumaInterp(prev);
@@ -343,10 +354,10 @@ namespace Broadcaster
                         if (err < best) { best = err; motion = v; }
                     }
                 }
-                float3 earlier = EarlierFrame.SampleLevel(LinearSample, uv-motion*0.5, 0).rgb;
-                float3 later = LaterFrame.SampleLevel(LinearSample, uv+motion*0.5, 0).rgb;
+                float3 earlier = EarlierFrame.SampleLevel(LinearSample, uv-motion*t, 0).rgb;
+                float3 later = LaterFrame.SampleLevel(LinearSample, uv+motion*(1.0-t), 0).rgb;
                 float confidence = saturate((0.15 - best) * 8.0);
-                return float4(saturate(lerp(baseBlend,(earlier+later)*0.5,confidence)),1);
+                return float4(saturate(lerp(baseBlend, lerp(earlier,later,t), confidence)),1);
             }
             float4 CopyCurrentPS(VertexOut input) : SV_Target
             {
@@ -477,7 +488,7 @@ namespace Broadcaster
                 return float4(saturate(mixColor),1);
             }";
 
-        public D3D11CaptureRenderer(MediaSource source, IntPtr hwnd, ColorProfile profile, double sourceFps, bool previewVsync, bool interpolateFrames,
+        public D3D11CaptureRenderer(MediaSource source, IntPtr hwnd, ColorProfile profile, double sourceFps, bool previewVsync, int interpolationFactor,
             Action onReady, Action<string> onError)
         {
             _source = source ?? throw new ArgumentNullException(nameof(source));
@@ -497,7 +508,7 @@ namespace Broadcaster
                 Math.Max(0, Math.Min(100, profile.DebandStrength)) / 100f : 0f;
             _requestedSourceFps = sourceFps > 0 && sourceFps <= 1000 ? sourceFps : 60.0;
             _previewVsync = previewVsync;
-            _interpolateFrames = interpolateFrames;
+            _interpolationFactor = Math.Max(1, Math.Min(5, interpolationFactor));
             _onReady = onReady;
             _onError = onError;
         }
@@ -554,6 +565,7 @@ namespace Broadcaster
                         }
                         Interlocked.Increment(ref _receivedSamples);
                         ResizeSwapChainIfNecessary();
+                        if (_interpolateFrames) RefreshMonitorRate();
                         UploadSample(sample);
                         long drawStart = System.Diagnostics.Stopwatch.GetTimestamp();
                         int displayed = Draw();
@@ -562,10 +574,9 @@ namespace Broadcaster
                         {
                             double drawMs = (System.Diagnostics.Stopwatch.GetTimestamp() - drawStart) *
                                 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-                            // Do not sacrifice the incoming HDMI rate just to generate
-                            // synthetic frames. Disable ×2 for this session after
-                            // repeated over-budget presents, keeping native preview.
-                            if (drawMs > 1350.0 / _requestedSourceFps)
+                            // Automatically return to native preview if multi-frame
+                            // presentation repeatedly exceeds the HDMI frame budget.
+                            if (drawMs > 1600.0 / _requestedSourceFps)
                                 _slowInterpolationFrames++;
                             else
                                 _slowInterpolationFrames = 0;
@@ -691,11 +702,25 @@ namespace Broadcaster
                 OutputHandle = _hwnd,
                 SampleDescription = new SampleDescription(1, 0),
                 IsWindowed = true,
-                SwapEffect = SwapEffect.Discard,
+                SwapEffect = SwapEffect.FlipDiscard,
                 Flags = SwapChainFlags.None
             };
-            D3DDevice.CreateWithSwapChain(DriverType.Hardware, DeviceCreationFlags.BgraSupport,
-                description, out _device, out _swapChain);
+            // DXGI flip model is the modern Windows 10/11 windowed presentation
+            // path. Keep the legacy blt-model as a driver/OS compatibility fallback.
+            try
+            {
+                D3DDevice.CreateWithSwapChain(DriverType.Hardware, DeviceCreationFlags.BgraSupport,
+                    description, out _device, out _swapChain);
+            }
+            catch (SharpDXException)
+            {
+                _swapChain?.Dispose(); _swapChain = null;
+                _device?.Dispose(); _device = null;
+                description.SwapEffect = SwapEffect.Discard;
+                D3DDevice.CreateWithSwapChain(DriverType.Hardware, DeviceCreationFlags.BgraSupport,
+                    description, out _device, out _swapChain);
+            }
+            RefreshMonitorRate(force: true);
             _surfaceWidth = Math.Max(1, _windowWidth);
             _surfaceHeight = Math.Max(1, _windowHeight);
             CreateRenderTarget();
@@ -748,6 +773,11 @@ namespace Broadcaster
                 _pixelShader = new PixelShader(_device, pixelCode);
             if (_interpolateFrames)
             {
+                _interpParamsBuffer = new D3DBuffer(_device, new BufferDescription
+                {
+                    SizeInBytes = 16, BindFlags = BindFlags.ConstantBuffer,
+                    Usage = D3DResourceUsage.Default, CpuAccessFlags = CpuAccessFlags.None
+                });
                 using (var code = ShaderBytecode.Compile(Hlsl + "\n" + InterpolationHlsl,
                     "IntermediatePS", "ps_4_0").Bytecode)
                     _interpShader = new PixelShader(_device, code);
@@ -797,6 +827,7 @@ namespace Broadcaster
             _interpPreviousSrv = new ShaderResourceView(_device, _interpPrevious);
             _interpCurrentSrv = new ShaderResourceView(_device, _interpCurrent);
             _hasPreviousFrame = false;
+            _interpolationRemainder = 0;
         }
 
         private Texture2D CreateInterpolationTexture()
@@ -848,6 +879,7 @@ namespace Broadcaster
             _rtv.Dispose();
             _rtv = null;
             ReleaseInterpolationTargets();
+            _device.ImmediateContext.ClearState();
             _swapChain.ResizeBuffers(2, w, h, DxgiFormat.B8G8R8A8_UNorm, SwapChainFlags.None);
             _surfaceWidth = w; _surfaceHeight = h;
             CreateRenderTarget();
@@ -978,7 +1010,7 @@ namespace Broadcaster
             // Unscaled, zero-sharpen frames can be decoded directly into the
             // backbuffer: one GPU render pass instead of two (especially 4K).
             bool noSharpen = !_gpuEnhancementsEnabled || !_profile.SharpenEnabled || _profile.SharpenAmount == 0;
-            bool directConversion = (!_interpolateFrames || _interpolationSuspended) && _antiAliasingMode == "Off" && noSharpen && _debandAmount == 0f &&
+            bool directConversion = !_canGenerateFrames && _antiAliasingMode == "Off" && noSharpen && _debandAmount == 0f &&
                                     _sourceWidth == _surfaceWidth && _sourceHeight == _surfaceHeight;
             if (directConversion)
             {
@@ -1002,7 +1034,7 @@ namespace Broadcaster
 
             // Passe AA facultative, avant le sharpen. Lorsque la netteté est
             // coupée et qu'il n'y a pas de redimensionnement, AA -> backbuffer.
-            bool aaDirect = (!_interpolateFrames || _interpolationSuspended) && _antiAliasingMode != "Off" && noSharpen && _debandAmount == 0f &&
+            bool aaDirect = !_canGenerateFrames && _antiAliasingMode != "Off" && noSharpen && _debandAmount == 0f &&
                             _sourceWidth == _surfaceWidth && _sourceHeight == _surfaceHeight;
             if (_antiAliasingMode == "FXAA")
             {
@@ -1055,75 +1087,139 @@ namespace Broadcaster
             return PresentWithOptionalInterpolation();
         }
 
+        // Refresh rate is read from the MONITOR CONTAINING THE WINDOW, not from
+        // the HDMI capture FPS or the primary monitor. Re-query after window moves.
+        private void RefreshMonitorRate(bool force = false)
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (!force && (now - _lastMonitorRefreshQueryTick) < Stopwatch.Frequency * 2) return;
+            _lastMonitorRefreshQueryTick = now;
+            try
+            {
+                string deviceName = Screen.FromHandle(_hwnd).DeviceName;
+                NativeDisplayMode mode = new NativeDisplayMode();
+                mode.Size = (short)Marshal.SizeOf(typeof(NativeDisplayMode));
+                if (EnumDisplaySettings(deviceName, -1, ref mode) && mode.DisplayFrequency >= 24 && mode.DisplayFrequency <= 1000)
+                    _monitorRefreshHz = mode.DisplayFrequency;
+            }
+            catch { /* Keep last known display refresh; never stop HDMI capture. */ }
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct NativeDisplayMode
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+            public short SpecVersion, DriverVersion, Size, DriverExtra;
+            public int Fields;
+            public int PositionX, PositionY, DisplayOrientation, DisplayFixedOutput;
+            public short Color, Duplex, YResolution, TTOption, Collate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string FormName;
+            public short LogPixels;
+            public int BitsPerPixel, PixelsWidth, PixelsHeight, DisplayFlags, DisplayFrequency;
+            public int IcmMethod, IcmIntent, MediaType, DitherType, Reserved1, Reserved2, PanningWidth, PanningHeight;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref NativeDisplayMode mode);
+
+        // If ×5 is chosen on an 80 Hz screen with 60 Hz HDMI, we MUST NOT
+        // block the capture worker for five V-Sync presents per HDMI sample.
+        // This fractional budget produces at most the display refresh rate.
+        private int CountIntermediateFrames()
+        {
+            RefreshMonitorRate();
+            double desired = Math.Min(_interpolationFactor, _monitorRefreshHz / _requestedSourceFps);
+            if (desired <= 1.001) { _interpolationRemainder = 0; return 0; }
+            _interpolationRemainder += desired - 1.0;
+            int count = Math.Min(_interpolationFactor - 1, (int)_interpolationRemainder);
+            _interpolationRemainder -= count;
+            return Math.Max(0, count);
+        }
+
+        private void PresentNative(bool respectVsync = true)
+        {
+            _swapChain.Present(_previewVsync && respectVsync ? 1 : 0, PresentFlags.None);
+        }
+
         private int PresentWithOptionalInterpolation()
         {
-            if (!_interpolateFrames || _interpolationSuspended)
+            if (!_canGenerateFrames)
             {
-                _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
+                PresentNative();
                 return 1;
             }
 
+            int extraFrames = _hasPreviousFrame ? CountIntermediateFrames() : 0;
             var context = _device.ImmediateContext;
-            // The final post-processed frame is in the swapchain backbuffer.
-            // A GPU copy keeps two RGB frames without any CPU readback.
+            // Capture the final RGB output on the GPU, without CPU readback.
+            // Release our temporary backbuffer reference before any flip Present.
             context.OutputMerger.SetTargets((RenderTargetView)null);
             using (var backBuffer = _swapChain.GetBackBuffer<Texture2D>(0))
-            {
                 context.CopyResource(backBuffer, _interpCurrent);
-                int count = 1;
-                if (_hasPreviousFrame && _running)
+
+            if (extraFrames > 0 && _running)
+            {
+                context.PixelShader.Set(_interpShader);
+                context.PixelShader.SetShaderResource(4, _interpPreviousSrv);
+                context.PixelShader.SetShaderResource(5, _interpCurrentSrv);
+                context.PixelShader.SetConstantBuffer(1, _interpParamsBuffer);
+                long cycleStart = Stopwatch.GetTimestamp();
+                double stepMs = 1000.0 / Math.Max(_requestedSourceFps, 1.0) / (extraFrames + 1);
+                for (int i = 1; i <= extraFrames && _running; i++)
                 {
+                    // One constant per fractional time step, not repeated ×2 frames.
+                    var fraction = new Vector4((float)i / (extraFrames + 1), 0, 0, 0);
+                    context.UpdateSubresource(ref fraction, _interpParamsBuffer);
                     context.OutputMerger.SetTargets(_rtv);
                     context.Rasterizer.SetViewport(0, 0, _surfaceWidth, _surfaceHeight);
-                    context.PixelShader.Set(_interpShader);
-                    context.PixelShader.SetShaderResource(4, _interpPreviousSrv);
-                    context.PixelShader.SetShaderResource(5, _interpCurrentSrv);
                     context.Draw(3, 0);
-                    context.PixelShader.SetShaderResource(4, null);
-                    context.PixelShader.SetShaderResource(5, null);
-                    // Presentation may be paced by V-Sync (recommended on 120Hz+).
-                    long midpointTick = System.Diagnostics.Stopwatch.GetTimestamp();
-                    _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
+                    // If the monitor cannot hold all requested V-Sync intervals,
+                    // avoid turning the HDMI reader into a slow presentation loop.
+                    PresentNative(_monitorRefreshHz >= _requestedSourceFps * (extraFrames + 1) - 0.5);
                     Interlocked.Increment(ref _generatedSamples);
-                    count++;
-                    // Without V-Sync, space the two images across one HDMI frame
-                    // instead of presenting both in a burst (which would show no
-                    // actual 120-Hz benefit). Costs up to half a frame of latency.
+                    // When V-Sync is off, avoid a burst of frames that only the
+                    // last front buffer would show. Sleep lightly, never spin.
                     if (!_previewVsync)
                     {
-                        double halfFrameMs = Math.Min(12.5, 500.0 / _requestedSourceFps);
+                        double deadline = stepMs * i;
                         while (_running &&
-                               (System.Diagnostics.Stopwatch.GetTimestamp() - midpointTick) *
-                                   1000.0 / System.Diagnostics.Stopwatch.Frequency < halfFrameMs - 0.5)
+                            (Stopwatch.GetTimestamp() - cycleStart) * 1000.0 / Stopwatch.Frequency < deadline - 0.75)
                             Thread.Sleep(1);
                     }
-                    // Draw the true current frame after the synthesized midpoint.
-                    // Do not write a backbuffer resource acquired before Present().
-                    context.OutputMerger.SetTargets(_rtv);
-                    context.PixelShader.Set(_interpCopyShader);
-                    context.PixelShader.SetShaderResource(5, _interpCurrentSrv);
-                    context.Draw(3, 0);
-                    context.PixelShader.SetShaderResource(5, null);
                 }
-                _swapChain.Present(_previewVsync ? 1 : 0, PresentFlags.None);
-                // Recycle textures/views, not an extra 1080p/4K GPU copy.
-                var tmpTex = _interpPrevious;
-                _interpPrevious = _interpCurrent;
-                _interpCurrent = tmpTex;
-                var tmpSrv = _interpPreviousSrv;
-                _interpPreviousSrv = _interpCurrentSrv;
-                _interpCurrentSrv = tmpSrv;
-                _hasPreviousFrame = true;
-                return count;
+                context.PixelShader.SetShaderResource(4, null);
+                context.PixelShader.SetShaderResource(5, null);
+                context.PixelShader.SetConstantBuffer(1, null);
+                // Backbuffer 0 rotates with flip presentation. Rebind before draw.
+                context.OutputMerger.SetTargets(_rtv);
+                context.PixelShader.Set(_interpCopyShader);
+                context.PixelShader.SetShaderResource(5, _interpCurrentSrv);
+                context.Draw(3, 0);
+                context.PixelShader.SetShaderResource(5, null);
             }
+            // No synthetic frame was needed: original GPU output remains valid.
+            // The last image of each sequence is always the real capture frame.
+            PresentNative();
+            var tmpTex = _interpPrevious;
+            _interpPrevious = _interpCurrent;
+            _interpCurrent = tmpTex;
+            var tmpSrv = _interpPreviousSrv;
+            _interpPreviousSrv = _interpCurrentSrv;
+            _interpCurrentSrv = tmpSrv;
+            _hasPreviousFrame = true;
+            return extraFrames + 1;
         }
 
         private void DisposeGraphics()
         {
+            if (_device != null)
+                _device.ImmediateContext.ClearState();
             _rtv?.Dispose(); _rtv = null;
             ReleaseInterpolationTargets();
             _interpShader?.Dispose(); _interpShader = null;
             _interpCopyShader?.Dispose(); _interpCopyShader = null;
+            _interpParamsBuffer?.Dispose(); _interpParamsBuffer = null;
             _convertedRtv?.Dispose(); _convertedRtv = null;
             _convertedSrv?.Dispose(); _convertedSrv = null;
             _convertedTexture?.Dispose(); _convertedTexture = null;

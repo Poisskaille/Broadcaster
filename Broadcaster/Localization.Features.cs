@@ -22,6 +22,9 @@ namespace Broadcaster
                 ["en"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["Empêcher la mise en veille pendant la capture"] = "Prevent sleep while capturing",
+                    ["Interpolation GPU (expérimental) :"] = "GPU frame interpolation (experimental):",
+                    ["Désactivé (FPS natifs)"] = "Disabled (native FPS)",
+                    ["Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native."] = "Generates up to four intermediate frames between HDMI frames. Limited by display refresh rate; may add latency or artifacts. Capture remains native.",
                     ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU ×2 interpolation (experimental, 120 Hz display recommended)",
                     ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Creates an intermediate frame between two HDMI frames. May add latency and artifacts; does not increase capture card FPS. Uses DirectX 11.",
                     ["FPS générés "] = "Generated FPS ",
@@ -132,6 +135,9 @@ namespace Broadcaster
                 ["es"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["Empêcher la mise en veille pendant la capture"] = "Evitar suspensión durante la captura",
+                    ["Interpolation GPU (expérimental) :"] = "Interpolación de fotogramas GPU (experimental):",
+                    ["Désactivé (FPS natifs)"] = "Desactivado (FPS nativos)",
+                    ["Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native."] = "Genera hasta cuatro fotogramas intermedios entre fotogramas HDMI. Limitado por los Hz de la pantalla; puede añadir latencia y artefactos. La captura sigue siendo nativa.",
                     ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "Interpolación GPU ×2 (experimental, se recomienda pantalla de 120 Hz)",
                     ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Genera un fotograma intermedio entre dos fotogramas HDMI. Puede añadir latencia y artefactos; no aumenta los FPS de captura. Usa DirectX 11.",
                     ["FPS générés "] = "FPS generados ",
@@ -242,6 +248,9 @@ namespace Broadcaster
                 ["de"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["Empêcher la mise en veille pendant la capture"] = "Ruhezustand während der Aufnahme verhindern",
+                    ["Interpolation GPU (expérimental) :"] = "GPU-Bildinterpolation (experimentell):",
+                    ["Désactivé (FPS natifs)"] = "Deaktiviert (native FPS)",
+                    ["Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native."] = "Erzeugt bis zu vier Zwischenbilder zwischen HDMI-Bildern. Durch die Bildwiederholrate begrenzt; kann Latenz und Artefakte verursachen. Die Aufnahme bleibt nativ.",
                     ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU-Interpolation ×2 (experimentell, 120-Hz-Monitor empfohlen)",
                     ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Erzeugt ein Zwischenbild zwischen zwei HDMI-Bildern. Kann Latenz und Artefakte verursachen; erhöht nicht die Aufnahme-FPS. Verwendet DirectX 11.",
                     ["FPS générés "] = "Generierte FPS ",
@@ -352,6 +361,9 @@ namespace Broadcaster
                 ["nb"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["Empêcher la mise en veille pendant la capture"] = "Hindre hvilemodus under opptak",
+                    ["Interpolation GPU (expérimental) :"] = "GPU-bildeinterpolering (eksperimentell):",
+                    ["Désactivé (FPS natifs)"] = "Deaktivert (original FPS)",
+                    ["Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native."] = "Genererer opptil fire mellomliggende bilder mellom HDMI-bilder. Begrenset av skjermens oppdateringsfrekvens; kan øke forsinkelse og gi artefakter. Opptaket er fortsatt originalt.",
                     ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU-interpolering ×2 (eksperimentell, 120 Hz-skjerm anbefales)",
                     ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Lager et mellomliggende bilde mellom to HDMI-bilder. Kan øke forsinkelse og gi artefakter; øker ikke opptakskortets FPS. Bruker DirectX 11.",
                     ["FPS générés "] = "Genererte FPS ",
@@ -462,6 +474,9 @@ namespace Broadcaster
                 ["sv"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["Empêcher la mise en veille pendant la capture"] = "Förhindra viloläge under inspelning",
+                    ["Interpolation GPU (expérimental) :"] = "GPU-bildinterpolering (experimentell):",
+                    ["Désactivé (FPS natifs)"] = "Avaktiverad (ursprungliga FPS)",
+                    ["Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native."] = "Skapar upp till fyra mellanbilder mellan HDMI-bilder. Begränsas av skärmens uppdateringsfrekvens; kan ge fördröjning och artefakter. Inspelningen är fortsatt oförändrad.",
                     ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "GPU-interpolering ×2 (experimentell, 120 Hz-skärm rekommenderas)",
                     ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Skapar en mellanbild mellan två HDMI-bilder. Kan öka fördröjningen och ge artefakter; höjer inte inspelningskortets FPS. Använder DirectX 11.",
                     ["FPS générés "] = "Genererade FPS ",
@@ -572,6 +587,9 @@ namespace Broadcaster
                 ["it"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["Empêcher la mise en veille pendant la capture"] = "Impedisci la sospensione durante la cattura",
+                    ["Interpolation GPU (expérimental) :"] = "Interpolazione fotogrammi GPU (sperimentale):",
+                    ["Désactivé (FPS natifs)"] = "Disattivata (FPS nativi)",
+                    ["Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native."] = "Genera fino a quattro fotogrammi intermedi tra quelli HDMI. Limitata dalla frequenza dello schermo; può aggiungere latenza e artefatti. La cattura rimane nativa.",
                     ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "Interpolazione GPU ×2 (sperimentale, consigliato schermo a 120 Hz)",
                     ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Genera un fotogramma intermedio tra due fotogrammi HDMI. Può aumentare latenza e artefatti; non aumenta gli FPS della scheda. Usa DirectX 11.",
                     ["FPS générés "] = "FPS generati ",
@@ -682,6 +700,9 @@ namespace Broadcaster
                 ["pt"] = new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     ["Empêcher la mise en veille pendant la capture"] = "Impedir suspensão durante a captura",
+                    ["Interpolation GPU (expérimental) :"] = "Interpolação de fotogramas GPU (experimental):",
+                    ["Désactivé (FPS natifs)"] = "Desativada (FPS nativos)",
+                    ["Génère jusqu’à quatre images intermédiaires par image HDMI. Limité par les Hz de l’écran ; peut ajouter de la latence et des artefacts. La capture reste native."] = "Gera até quatro fotogramas intermédios entre imagens HDMI. Limitada pela taxa do ecrã; pode acrescentar latência e artefactos. A captura permanece nativa.",
                     ["Interpolation GPU ×2 (expérimental, écran 120 Hz conseillé)"] = "Interpolação GPU ×2 (experimental, ecrã de 120 Hz recomendado)",
                     ["Génère une image intermédiaire entre deux images HDMI. Peut augmenter la latence et créer des artefacts ; n'augmente pas les FPS de la carte. Utilise DirectX 11."] = "Gera um fotograma intermédio entre dois fotogramas HDMI. Pode aumentar latência e artefactos; não aumenta os FPS da placa. Usa DirectX 11.",
                     ["FPS générés "] = "FPS gerados ",
