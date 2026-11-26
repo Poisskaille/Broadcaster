@@ -26,6 +26,9 @@ namespace Broadcaster
         public bool PreviewVsync { get; set; } = false; // can cap preview to monitor refresh
         public bool ShowDebugOverlay { get; set; } = false; // Extras : panneau diagnostic désactivé par défaut
         public bool PreventSleepWhileCapturing { get; set; } = true;
+        public bool DebugLogCaptureSession { get; set; } = false;
+        public bool DebugLogFrameGeneration { get; set; } = false;
+        public bool DebugLogDiscordPresence { get; set; } = false;
         // Off / X2 / X3 / X4 / X5. Does not modify HDMI capture FPS.
         public string FrameInterpolation { get; set; } = "Off";
 
@@ -193,6 +196,12 @@ namespace Broadcaster
                     config.ShowDebugOverlay = overlay;
                 if (values.TryGetValue("PreventSleepWhileCapturing", out var awakeValue) && bool.TryParse(awakeValue, out var awake))
                     config.PreventSleepWhileCapturing = awake;
+                if (values.TryGetValue("DebugLogCaptureSession", out var debugCapture) && bool.TryParse(debugCapture, out var captureLog))
+                    config.DebugLogCaptureSession = captureLog;
+                if (values.TryGetValue("DebugLogFrameGeneration", out var debugFrameGen) && bool.TryParse(debugFrameGen, out var frameLog))
+                    config.DebugLogFrameGeneration = frameLog;
+                if (values.TryGetValue("DebugLogDiscordPresence", out var debugDiscord) && bool.TryParse(debugDiscord, out var discordLog))
+                    config.DebugLogDiscordPresence = discordLog;
                 if (values.TryGetValue("FrameInterpolation", out var interpolation))
                     config.FrameInterpolation = InterpolationFactor(interpolation) > 1 ? "X" + InterpolationFactor(interpolation) : "Off";
                 if (values.TryGetValue("DiscordEnabled", out var dpEnable) && bool.TryParse(dpEnable, out var dpOn)) config.DiscordPresence.Enabled = dpOn;
@@ -282,6 +291,9 @@ namespace Broadcaster
                     Put("PreviewVsync", PreviewVsync);
                     Put("ShowDebugOverlay", ShowDebugOverlay);
                     Put("PreventSleepWhileCapturing", PreventSleepWhileCapturing);
+                    Put("DebugLogCaptureSession", DebugLogCaptureSession);
+                    Put("DebugLogFrameGeneration", DebugLogFrameGeneration);
+                    Put("DebugLogDiscordPresence", DebugLogDiscordPresence);
                     Put("FrameInterpolation", FrameInterpolation);
                     PutDiscord(values, DiscordPresence);
                     Put("DisplayDeviceName", DisplayDeviceName);

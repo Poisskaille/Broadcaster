@@ -206,6 +206,10 @@ namespace Broadcaster
 
         private void StartVideoSession(VideoDeviceInfo videoDevice, IntPtr renderHwnd, int targetWidth, int targetHeight, int targetFps, bool previewVsync, int interpolationFactor)
         {
+            FrameGenerationDebugLog.StartSession(DebugLogFlags.CaptureSession, "Video session");
+            FrameGenerationDebugLog.Log(DebugLogFlags.CaptureSession, Localization.F("StartVideoSession device={0} requested={1}x{2} targetFps={3} interpolation=X{4} vsync={5}",
+                videoDevice.FriendlyName, targetWidth, targetHeight, targetFps <= 0 ? 0 : targetFps,
+                Math.Max(1, interpolationFactor), previewVsync ? 1 : 0));
             _videoSourceActivate = videoDevice.Activate;
             _videoSource = _videoSourceActivate.ActivateObject<MediaSource>();
             _videoProcAmp = VideoProcAmpControl.TryCreate(_videoSource);
@@ -420,6 +424,10 @@ namespace Broadcaster
 
             _selectedSourceFps = chosen.Fps;
             ActiveVideoMode = chosen;
+            FrameGenerationDebugLog.Log(DebugLogFlags.CaptureSession, Localization.F("Capture mode selected: requested={0}x{1}@{2} format={3}; chosen={4}",
+                wantedWidth, wantedHeight, targetFps <= 0 ? 0 : targetFps,
+                string.IsNullOrWhiteSpace(requestedFormat) ? "Auto" : requestedFormat,
+                chosen.Description));
             var warning = new List<string>();
             if (chosen.Width != wantedWidth || chosen.Height != wantedHeight)
                 warning.Add(Localization.T("Résolution de repli : la carte ne propose pas le mode demandé."));
@@ -435,6 +443,8 @@ namespace Broadcaster
             else if (chosen.UncompressedMiBPerSecond > 110)
                 warning.Add(Localization.T("Flux non compressé : connexion USB 3.x/PCIe conseillée."));
             ActiveVideoWarning = string.Join("  ", warning);
+            if (!string.IsNullOrWhiteSpace(ActiveVideoWarning))
+                FrameGenerationDebugLog.Log(DebugLogFlags.CaptureSession, "Capture warning: " + ActiveVideoWarning);
             return chosen.Description;
         }
 

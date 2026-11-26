@@ -106,6 +106,26 @@ namespace Broadcaster
         private readonly Button _openClipsButton = new Button { Text = "Ouvrir le dossier des clips", AutoSize = true };
         private readonly Button _keyBindingsButton = new Button { Text = "Raccourcis clavier...", AutoSize = true };
         private KeyBindings _bindings;
+        private readonly CheckBox _debugLogCaptureCheck = new CheckBox
+        {
+            Text = "Journaliser la session vidéo et le choix des modes de capture", AutoSize = true
+        };
+        private readonly CheckBox _debugLogFrameGenCheck = new CheckBox
+        {
+            Text = "Journaliser la génération d'image / interpolation GPU", AutoSize = true
+        };
+        private readonly CheckBox _debugLogDiscordCheck = new CheckBox
+        {
+            Text = "Journaliser Discord Rich Presence", AutoSize = true
+        };
+        private readonly Label _debugLogsHint = new Label
+        {
+            Text = @"Les logs de debug écrivent dans %APPDATA%\Broadcaster\frame-generation.log." + Environment.NewLine +
+                   "Par défaut tout est désactivé pour éviter les écritures inutiles.",
+            AutoSize = true,
+            ForeColor = Color.DimGray,
+            MaximumSize = new Size(620, 0)
+        };
 
         // --- Onglet Vidéo ---
         private readonly ComboBox _profileCombo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -262,6 +282,9 @@ namespace Broadcaster
             PopulateDevices();
             PopulateColorTab();
             RefreshVideoEditors();
+            _debugLogCaptureCheck.Checked = _initialConfig.DebugLogCaptureSession;
+            _debugLogFrameGenCheck.Checked = _initialConfig.DebugLogFrameGeneration;
+            _debugLogDiscordCheck.Checked = _initialConfig.DebugLogDiscordPresence;
             Localization.TranslateControls(this);
             AcceptButton = _okButton;
             CancelButton = _cancelButton;
@@ -329,11 +352,14 @@ namespace Broadcaster
             tabs.TabPages.Add(generalTab);
             tabs.TabPages.Add(videoTab);
             var extrasTab = new TabPage("Extras") { AutoScroll = true };
+            var debugTab = new TabPage("Debug") { AutoScroll = true };
             tabs.TabPages.Add(extrasTab);
+            tabs.TabPages.Add(debugTab);
 
             BuildExtrasTab(extrasTab);
             BuildGeneralTab(generalTab);
             BuildVideoTab(videoTab);
+            BuildDebugTab(debugTab);
 
             _okButton.Location = new Point(510, 675);
             _cancelButton.Location = new Point(600, 675);
@@ -341,6 +367,26 @@ namespace Broadcaster
             Controls.Add(tabs);
             Controls.Add(_okButton);
             Controls.Add(_cancelButton);
+        }
+
+        private void BuildDebugTab(TabPage page)
+        {
+            page.AutoScroll = true;
+            var title = new Label
+            {
+                Text = "Activer uniquement les journaux utiles au diagnostic.",
+                AutoSize = true,
+                Location = new Point(15, 18)
+            };
+            _debugLogCaptureCheck.Location = new Point(15, 58);
+            _debugLogFrameGenCheck.Location = new Point(15, 92);
+            _debugLogDiscordCheck.Location = new Point(15, 126);
+            _debugLogsHint.Location = new Point(35, 165);
+            page.Controls.Add(title);
+            page.Controls.Add(_debugLogCaptureCheck);
+            page.Controls.Add(_debugLogFrameGenCheck);
+            page.Controls.Add(_debugLogDiscordCheck);
+            page.Controls.Add(_debugLogsHint);
         }
 
         private void PopulateLanguageCombo()
@@ -1263,6 +1309,9 @@ namespace Broadcaster
                 PreviewVsync = _previewVsyncCheck.Checked,
                 ShowDebugOverlay = _debugOverlayCheck.Checked,
                 PreventSleepWhileCapturing = _preventSleepCheck.Checked,
+                DebugLogCaptureSession = _debugLogCaptureCheck.Checked,
+                DebugLogFrameGeneration = _debugLogFrameGenCheck.Checked,
+                DebugLogDiscordPresence = _debugLogDiscordCheck.Checked,
                 FrameInterpolation = _interpolationCombo.SelectedIndex <= 0 ? "Off" : "X" + (_interpolationCombo.SelectedIndex + 1),
                 DiscordPresence = _discordSettings.Clone(),
                 DisplayDeviceName = _orderedScreens[_screenCombo.SelectedIndex].DeviceName,

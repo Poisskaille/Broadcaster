@@ -64,6 +64,13 @@ namespace Broadcaster
         private bool _hasPreviousFrame;
         private bool _interpolationSuspended;
         private int _slowInterpolationFrames;
+        private long _interpolationRetryAfterTick;
+        private long _lastDebugLogTick;
+        private long _lastDebugReceivedSamples;
+        private long _lastDebugPresentedSamples;
+        private long _lastDebugGeneratedSamples;
+        private int _lastExtraFramesPresented;
+        private double _lastDrawMs;
         private long _generatedSamples;
         public long GeneratedSamples => Interlocked.Read(ref _generatedSamples);
         // When the user requests a pixel format explicitly, SourceReader is not
@@ -571,6 +578,8 @@ namespace Broadcaster
                 CreateGraphics();
                 if (!_running) return;
                 _onReady?.Invoke();
+                FrameGenerationDebugLog.Log(DebugLogFlags.FrameGeneration, Localization.F("Renderer ready: selectedSourceFps={0:0.00}, monitorHz={1:0.00}, interpolation=X{2}, vsync={3}",
+                    _requestedSourceFps, _monitorRefreshHz, _interpolationFactor, _previewVsync ? 1 : 0));
                 var fpsClock = System.Diagnostics.Stopwatch.StartNew();
                 int framesInWindow = 0;
 
@@ -601,6 +610,7 @@ namespace Broadcaster
                         }
                         Interlocked.Increment(ref _receivedSamples);
                         UpdateObservedCadence(timestamp);
+                        RetryInterpolationIfReady();
                         ResizeSwapChainIfNecessary();
                         if (_interpolateFrames) RefreshMonitorRate();
                         UploadSample(sample);
@@ -613,18 +623,20 @@ namespace Broadcaster
                                 1000.0 / System.Diagnostics.Stopwatch.Frequency;
                             // Automatically return to native preview if multi-frame
                             // presentation repeatedly exceeds the HDMI frame budget.
+                            _lastDrawMs = drawMs;
                             if (drawMs > 1600.0 / EffectiveSourceFps)
                                 _slowInterpolationFrames++;
                             else
                                 _slowInterpolationFrames = 0;
                             if (_slowInterpolationFrames >= 4)
-                                _interpolationSuspended = true;
+                                SuspendInterpolation(Localization.F("Interpolation temporarily suspended: drawMs={0:0.00} sourceFps={1:0.00} monitorHz={2:0.00}", drawMs, EffectiveSourceFps, _monitorRefreshHz));
                         }
                         framesInWindow++;
                         if (fpsClock.ElapsedMilliseconds >= 2000)
                         {
                             _measuredFpsTenths = (int)Math.Round(
                                 framesInWindow * 10000.0 / fpsClock.ElapsedMilliseconds);
+                            LogDebugSnapshot();
                             framesInWindow = 0;
                             fpsClock.Restart();
                         }
@@ -1167,6 +1179,48 @@ namespace Broadcaster
                 _observedSourceFps = _observedSourceFps * 0.85 + fps * 0.15;
         }
 
+        private void SuspendInterpolation(string reason)
+        {
+            if (_interpolationSuspended) return;
+            _interpolationSuspended = true;
+            _slowInterpolationFrames = 0;
+            _interpolationRetryAfterTick = Stopwatch.GetTimestamp() + Stopwatch.Frequency * 3;
+            FrameGenerationDebugLog.Log(DebugLogFlags.FrameGeneration, reason);
+        }
+
+        private void RetryInterpolationIfReady()
+        {
+            if (!_interpolationSuspended) return;
+            long now = Stopwatch.GetTimestamp();
+            if (now < _interpolationRetryAfterTick) return;
+            _interpolationSuspended = false;
+            _slowInterpolationFrames = 0;
+            FrameGenerationDebugLog.Log(DebugLogFlags.FrameGeneration, Localization.F("Interpolation resumed: observedSourceFps={0:0.00} monitorHz={1:0.00}", EffectiveSourceFps, _monitorRefreshHz));
+        }
+
+        private void LogDebugSnapshot()
+        {
+            long now = Stopwatch.GetTimestamp();
+            if (_lastDebugLogTick != 0 && now - _lastDebugLogTick < Stopwatch.Frequency * 2)
+                return;
+            long received = Interlocked.Read(ref _receivedSamples);
+            long presented = Interlocked.Read(ref _presentedSamples);
+            long generated = Interlocked.Read(ref _generatedSamples);
+            double elapsed = _lastDebugLogTick == 0 ? 0 : (now - _lastDebugLogTick) / (double)Stopwatch.Frequency;
+            double recvRate = elapsed > 0 ? (received - _lastDebugReceivedSamples) / elapsed : 0;
+            double presentRate = elapsed > 0 ? (presented - _lastDebugPresentedSamples) / elapsed : 0;
+            double genRate = elapsed > 0 ? (generated - _lastDebugGeneratedSamples) / elapsed : 0;
+            FrameGenerationDebugLog.Log(DebugLogFlags.FrameGeneration, Localization.F(
+                "FrameGen snapshot: observed={0:0.00} selected={1:0.00} monitor={2:0.00} receivedRate={3:0.00} presentedRate={4:0.00} generatedRate={5:0.00} extraFramesLast={6} canGenerate={7} suspended={8} drawMs={9:0.00}",
+                EffectiveSourceFps, _requestedSourceFps, _monitorRefreshHz,
+                recvRate, presentRate, genRate, _lastExtraFramesPresented,
+                _canGenerateFrames ? 1 : 0, _interpolationSuspended ? 1 : 0, _lastDrawMs));
+            _lastDebugLogTick = now;
+            _lastDebugReceivedSamples = received;
+            _lastDebugPresentedSamples = presented;
+            _lastDebugGeneratedSamples = generated;
+        }
+
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct NativeDisplayMode
         {
@@ -1208,11 +1262,13 @@ namespace Broadcaster
         {
             if (!_canGenerateFrames)
             {
+                _lastExtraFramesPresented = 0;
                 PresentNative();
                 return 1;
             }
 
             int extraFrames = _hasPreviousFrame ? CountIntermediateFrames() : 0;
+            _lastExtraFramesPresented = extraFrames;
             var context = _device.ImmediateContext;
             // Capture the final RGB output on the GPU, without CPU readback.
             // Release our temporary backbuffer reference before any flip Present.
@@ -1263,6 +1319,7 @@ namespace Broadcaster
             // No synthetic frame was needed: original GPU output remains valid.
             // The last image of each sequence is always the real capture frame.
             PresentNative();
+            _lastDrawMs = 0;
             var tmpTex = _interpPrevious;
             _interpPrevious = _interpCurrent;
             _interpCurrent = tmpTex;

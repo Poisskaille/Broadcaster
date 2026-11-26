@@ -161,6 +161,7 @@ namespace Broadcaster
         private void MainForm_Shown(object sender, EventArgs e)
         {
             _config = AppConfig.Load();
+            FrameGenerationDebugLog.ApplySettings(_config);
             _discordPresence.Apply(_config.DiscordPresence);
             Localization.UseLanguage(_config.Language);
             EnterFullscreen();
@@ -417,6 +418,7 @@ namespace Broadcaster
                     if (form.ShowDialog(this) == DialogResult.OK)
                     {
                         _config = form.ResultConfig;
+                        FrameGenerationDebugLog.ApplySettings(_config);
                         Localization.UseLanguage(_config.Language);
                         if (!_config.TrySave(out string configSaveError))
                             MessageBox.Show(this,

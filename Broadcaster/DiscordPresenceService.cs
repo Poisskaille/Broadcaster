@@ -23,6 +23,9 @@ namespace Broadcaster
         public void Apply(DiscordPresenceSettings next)
         {
             if (next == null) next = new DiscordPresenceSettings();
+            FrameGenerationDebugLog.Log(DebugLogFlags.DiscordPresence,
+                "Apply Discord Rich Presence: enabled=" + (next.Enabled ? "1" : "0") +
+                ", mode=" + (next.Mode ?? "") + ", platform=" + (next.Platform ?? ""));
             var settings = next.Clone();
             settings.Normalize();
             CancellationTokenSource old;
@@ -114,7 +117,17 @@ namespace Broadcaster
 
         private void SetStatus(int revision, string value)
         {
-            lock (_sync) if (_revision == revision) Status = value;
+            bool changed = false;
+            lock (_sync)
+            {
+                if (_revision == revision && Status != value)
+                {
+                    Status = value;
+                    changed = true;
+                }
+            }
+            if (changed)
+                FrameGenerationDebugLog.Log(DebugLogFlags.DiscordPresence, "Status: " + value);
         }
 
         private static NamedPipeClientStream Connect(string applicationId)
